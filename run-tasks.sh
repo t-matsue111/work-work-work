@@ -23,7 +23,7 @@ MODEL="sonnet"
 MAX_TURNS=30
 MCP_OPT=""
 RESUME_OPT=""
-WORK_DIR_OPT=""
+WORK_DIR=""
 
 # --- ログディレクトリ自動作成 ---
 mkdir -p "$LOG_DIR"
@@ -142,7 +142,7 @@ if [ -f "$TASKS_DB" ]; then
       [ -n "$T_MAXTURNS" ] && MAX_TURNS="$T_MAXTURNS"
       [ -n "$T_TOOLS" ] && ALLOWED_TOOLS="$T_TOOLS" && log "タスク設定: allowed_tools=$T_TOOLS"
       [ -n "$T_MCP" ] && MCP_OPT="--mcp-config $T_MCP" && log "タスク設定: mcp_config=$T_MCP"
-      [ -n "$T_WORKDIR" ] && WORK_DIR_OPT="--cwd $T_WORKDIR" && log "タスク設定: work_dir=$T_WORKDIR"
+      [ -n "$T_WORKDIR" ] && WORK_DIR="$T_WORKDIR" && log "タスク設定: work_dir=$T_WORKDIR"
     fi
   else
     if [ "$_EARLY_SOURCE" = "sqlite" ]; then
@@ -290,7 +290,7 @@ if [ -n "$SCHEDULE_ID" ]; then
 
     # 作業ディレクトリ
     if [ -n "$S_WORKDIR" ] && [ -d "$S_WORKDIR" ]; then
-      WORK_DIR_OPT="--cwd $S_WORKDIR"
+      WORK_DIR="$S_WORKDIR"
       log "  作業ディレクトリ: $S_WORKDIR"
     fi
 
@@ -332,8 +332,14 @@ fi
 CMD_LOG="timeout $TIMEOUT_SECONDS claude -p \"(プロンプト ${#PROMPT}文字)\" --output-format json --allowedTools \"$ALLOWED_TOOLS\" --max-turns $MAX_TURNS --model $MODEL"
 [ -n "$MCP_OPT" ] && CMD_LOG="$CMD_LOG $MCP_OPT"
 [ -n "$RESUME_OPT" ] && CMD_LOG="$CMD_LOG $RESUME_OPT"
-[ -n "$WORK_DIR_OPT" ] && CMD_LOG="$CMD_LOG $WORK_DIR_OPT"
+[ -n "$WORK_DIR" ] && CMD_LOG="(cd $WORK_DIR) $CMD_LOG"
 log "実行コマンド: $CMD_LOG"
+
+# 作業ディレクトリ変更（指定があれば）
+if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
+  log "作業ディレクトリへ移動: $WORK_DIR"
+  cd "$WORK_DIR"
+fi
 
 # タイムアウト付きで実行（エラーでも継続するため set +eu）
 set +eu
@@ -343,12 +349,14 @@ RAW_RESPONSE="$(timeout "$TIMEOUT_SECONDS" \
     --allowedTools "$ALLOWED_TOOLS" \
     $MCP_OPT \
     $RESUME_OPT \
-    $WORK_DIR_OPT \
     --max-turns "$MAX_TURNS" \
     --model "$MODEL" \
   2>>"$LOG_FILE")"
 CLI_EXIT_CODE=$?
 set -eu
+
+# 元のディレクトリに戻る
+cd "$PROJECT_DIR"
 
 END_TIME="$(date +%s)"
 DURATION_SECONDS=$((END_TIME - START_TIME))
@@ -456,6 +464,15 @@ fi
 # --- スケジュール結果処理 ---
 if [ -n "$SCHEDULE_ID" ]; then
   log "スケジュール $SCHEDULE_ID の結果を処理中..."
+  # スケジュール由来タスクのステータスを同期
+  if [ -n "$SCHEDULE_TASK_ID" ]; then
+    if [ "$STATUS" = "success" ]; then
+      sqlite3 "$TASKS_DB" "UPDATE tasks SET status = 'completed', completed_at = datetime('now','localtime') WHERE id = $SCHEDULE_TASK_ID AND status = 'pending';"
+    else
+      sqlite3 "$TASKS_DB" "UPDATE tasks SET status = 'error', result = '$(echo "${ERROR_MESSAGE:-実行失敗}" | sed "s/'/''/g")' WHERE id = $SCHEDULE_TASK_ID AND status = 'pending';"
+    fi
+  fi
+
   if [ "$STATUS" = "success" ]; then
     # 成功: consecutive_failures をリセット
     sqlite3 "$TASKS_DB" "UPDATE schedules SET consecutive_failures = 0, last_status = 'success' WHERE id = $SCHEDULE_ID;"
