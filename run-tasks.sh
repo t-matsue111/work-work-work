@@ -442,6 +442,7 @@ else
 fi
 
 log "ステータス: $STATUS"
+[ -n "$SCHEDULE_TASK_ID" ] && log "タスクID: #$SCHEDULE_TASK_ID"
 [ -n "$TASK_NAME" ] && log "タスク名: $TASK_NAME"
 [ -n "$TASK_TYPE" ] && log "タスク種別: $TASK_TYPE"
 [ -n "$COST_USD" ] && log "コスト: \$${COST_USD}"
@@ -543,6 +544,7 @@ log "SQLiteログ記録完了"
   echo "タスクソース: $TASK_SOURCE"
   echo "ステータス: $STATUS"
   echo "所要時間: ${DURATION_SECONDS}秒"
+  [ -n "$SCHEDULE_TASK_ID" ] && echo "タスクID: #$SCHEDULE_TASK_ID"
   [ -n "$TASK_NAME" ] && echo "タスク名: $TASK_NAME"
   [ -n "$TASK_TYPE" ] && echo "タスク種別: $TASK_TYPE"
   [ -n "$COST_USD" ] && echo "コスト: \$${COST_USD}"
