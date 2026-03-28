@@ -5,14 +5,6 @@ set -euo pipefail
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-# cron環境でキーチェーンからOAuth認証情報を読み込み
-if [ -z "${CLAUDE_CODE_CREDENTIALS:-}" ]; then
-  CLAUDE_CODE_CREDENTIALS="$(security find-generic-password -s 'Claude Code-credentials' -w 2>/dev/null || echo "")"
-  if [ -n "$CLAUDE_CODE_CREDENTIALS" ]; then
-    export CLAUDE_CODE_CREDENTIALS
-  fi
-fi
-
 # cron/ネスト実行時にClaude Codeのセッション検出を回避
 unset CLAUDECODE 2>/dev/null || true
 
