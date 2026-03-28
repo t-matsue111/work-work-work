@@ -689,13 +689,60 @@ class AppHandler(BaseHTTPRequestHandler):
 
 
 # ── メイン ─────────────────────────────────────────────────────────
+# ── タスクランナータイマー ─────────────────────────────────────────
+RUNNER_SCRIPT = os.path.join(BASE_DIR, "run-tasks.sh")
+RUNNER_INTERVAL = 600  # 10分
+
+def _set_runner_interval(val):
+    global RUNNER_INTERVAL
+    RUNNER_INTERVAL = val
+
+def _runner_loop():
+    """バックグラウンドでrun-tasks.shを定期実行する"""
+    import time
+    while True:
+        time.sleep(RUNNER_INTERVAL)
+        try:
+            pause_file = os.path.join(BASE_DIR, ".pause")
+            if os.path.isfile(pause_file):
+                continue
+            print(f"[runner] run-tasks.sh を実行中...")
+            result = subprocess.run(
+                ["/bin/bash", RUNNER_SCRIPT],
+                capture_output=True, text=True, timeout=600,
+                cwd=BASE_DIR,
+            )
+            if result.returncode == 0:
+                print(f"[runner] 完了 (exit 0)")
+            else:
+                print(f"[runner] 終了 (exit {result.returncode})")
+            if result.stderr:
+                for line in result.stderr.strip().split("\n")[-3:]:
+                    print(f"[runner]   {line}")
+        except subprocess.TimeoutExpired:
+            print("[runner] タイムアウト (600秒)")
+        except Exception as e:
+            print(f"[runner] エラー: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Claude Task Runner - API Server")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"ポート番号 (default: {DEFAULT_PORT})")
     parser.add_argument("--db", type=str, default=DEFAULT_DB_PATH, help=f"DBファイルパス (default: {DEFAULT_DB_PATH})")
+    parser.add_argument("--no-runner", action="store_true", help="タスクランナーの自動実行を無効化")
+    parser.add_argument("--interval", type=int, default=RUNNER_INTERVAL, help=f"実行間隔(秒) (default: {RUNNER_INTERVAL})")
     args = parser.parse_args()
 
     AppHandler.db_path = args.db
+
+    # タスクランナーのバックグラウンドタイマー起動
+    if not args.no_runner:
+        _set_runner_interval(args.interval)
+        runner_thread = threading.Thread(target=_runner_loop, daemon=True)
+        runner_thread.start()
+        print(f"[server] Runner: {args.interval}秒間隔で自動実行")
+    else:
+        print(f"[server] Runner: 無効 (--no-runner)")
 
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(("0.0.0.0", args.port), AppHandler)
@@ -706,7 +753,6 @@ def main():
 
     def shutdown(sig, frame):
         print("\n[server] シャットダウン中...")
-        # shutdown()はserve_forever()と同じスレッドから呼ぶとデッドロックするため別スレッドで実行
         threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGINT, shutdown)
