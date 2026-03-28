@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WORK WORK WORK - Debug Logs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+<style>
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:2px;height:calc(100vh - 60px);background:var(--bg)}
+.pane{display:flex;flex-direction:column;overflow:hidden;background:var(--surface-low)}
+.pane-header{padding:8px 14px;background:var(--surface-highest);display:flex;justify-content:space-between;align-items:center;gap:8px}
+.pane-header h3{font-family:var(--font-display);font-size:.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.pane-header .file-name{font-family:var(--font-display);font-size:.7rem;color:var(--primary-lit)}
+.pane-header .line-info{font-family:var(--font-display);font-size:.65rem;color:var(--text-secondary)}
+.pane-header button{font-family:var(--font-display);font-size:.65rem;padding:3px 8px;background:transparent;color:var(--text-secondary);border:1px solid var(--ghost);cursor:pointer;text-transform:uppercase;letter-spacing:.04em}
+.pane-header button:hover{background:var(--surface);color:var(--text)}
+.pane-content{flex:1;overflow-y:auto;padding:8px 12px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:.75rem;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--surface-lowest)}
+.pane-content .line-error{color:var(--error)}
+.pane-content .line-success{color:var(--secondary)}
+.pane-content .line-timestamp{color:var(--text-secondary)}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>WORK WORK WORK</h1>
+  <nav>
+    <a href="/">Kanban</a>
+    <a href="/tasks">Tasks</a>
+    <a href="/logs">Logs</a>
+    <a href="/schedules">Schedules</a>
+    <a href="/prompts">Prompts</a>
+    <a href="/debug-logs" class="active">Debug</a>
+  </nav>
+</header>
+<div class="grid" x-data="debugApp" x-init="init()">
+  <template x-for="pane in panes" :key="pane.type">
+    <div class="pane">
+      <div class="pane-header">
+        <h3 x-text="pane.label"></h3>
+        <span class="file-name" x-text="pane.file || 'no file'"></span>
+        <span class="line-info" x-text="pane.lines ? pane.showing + '/' + pane.lines + ' lines' : ''"></span>
+        <button @click="reload(pane)">Reload</button>
+      </div>
+      <div class="pane-content" x-html="highlight(pane.content)" :id="'pane-' + pane.type"></div>
+    </div>
+  </template>
+</div>
+<script src="/static/js/common.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script>
+document.addEventListener('alpine:init', function() {
+  Alpine.data('debugApp', function() {
+    return {
+      panes: [
+        { type: 'run', label: 'RUN LOG', file: '', content: '', lines: 0, showing: 0 },
+        { type: 'cron-tasks', label: 'CRON TASKS', file: '', content: '', lines: 0, showing: 0 },
+        { type: 'cron-email', label: 'CRON EMAIL', file: '', content: '', lines: 0, showing: 0 },
+        { type: 'email', label: 'EMAIL LOG', file: '', content: '', lines: 0, showing: 0 },
+      ],
+      async init() {
+        registerPageShortcuts({});
+        for (var i = 0; i < this.panes.length; i++) {
+          await this.reload(this.panes[i]);
+        }
+        // 自動スクロールを最下部に
+        this.$nextTick(function() {
+          document.querySelectorAll('.pane-content').forEach(function(el) {
+            el.scrollTop = el.scrollHeight;
+          });
+        });
+      },
+      async reload(pane) {
+        try {
+          var data = await api.get('/api/debug-logs?type=' + pane.type + '&tail=300');
+          pane.file = data.file || '';
+          pane.content = data.content || '(empty)';
+          pane.lines = data.lines || 0;
+          pane.showing = data.showing || 0;
+          this.$nextTick(function() {
+            var el = document.getElementById('pane-' + pane.type);
+            if (el) el.scrollTop = el.scrollHeight;
+          });
+        } catch(e) {
+          pane.content = 'Failed to load: ' + e;
+        }
+      },
+      highlight(text) {
+        if (!text) return '';
+        return text.split('\n').map(function(line) {
+          if (/ERROR|error|失敗|異常/.test(line)) return '<span class="line-error">' + esc(line) + '</span>';
+          if (/成功|success|完了|completed/.test(line)) return '<span class="line-success">' + esc(line) + '</span>';
+          return esc(line);
+        }).join('\n');
+      },
+    };
+  });
+});
+</script>
+</body>
+</html>

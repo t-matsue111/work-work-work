@@ -31,6 +31,7 @@ PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
 LOGS_DB_PATH = os.path.join(BASE_DIR, "db", "logs.db")
 CRON_NEXT_SCRIPT = os.path.join(BASE_DIR, "scripts", "cron-next.py")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+FILE_LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
 # HTMLページルーティング
 PAGE_ROUTES = {
@@ -39,6 +40,7 @@ PAGE_ROUTES = {
     "/logs": "logs.html",
     "/schedules": "schedules.html",
     "/prompts": "prompts.html",
+    "/debug-logs": "debug-logs.html",
 }
 
 
@@ -128,7 +130,9 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         # API ルーティング
-        if path == "/api/prompts":
+        if path == "/api/debug-logs":
+            self._handle_get_debug_logs(qs)
+        elif path == "/api/prompts":
             self._handle_get_prompts()
         elif path == "/api/tasks":
             self._handle_get_tasks()
@@ -457,6 +461,48 @@ class AppHandler(BaseHTTPRequestHandler):
             self._send_json({"triggered": schedule_id, "next_run_at": now})
         finally:
             conn.close()
+
+    # ── Debug Logs API ─────────────────────────────────────────────
+    def _handle_get_debug_logs(self, qs):
+        """最新のrunログファイルとcronログファイルの内容を返す"""
+        file_type = qs.get("type", ["run"])[0]  # run or cron-tasks or cron-email
+        tail = int(qs.get("tail", [200])[0])
+
+        def find_latest(prefix):
+            try:
+                files = sorted(
+                    [f for f in os.listdir(FILE_LOGS_DIR) if f.startswith(prefix) and f.endswith(".log")],
+                    reverse=True,
+                )
+                return os.path.join(FILE_LOGS_DIR, files[0]) if files else None
+            except Exception:
+                return None
+
+        if file_type == "cron-tasks":
+            fpath = os.path.join(FILE_LOGS_DIR, "cron-tasks.log")
+        elif file_type == "cron-email":
+            fpath = os.path.join(FILE_LOGS_DIR, "cron-email.log")
+        elif file_type == "email":
+            fpath = find_latest("email-")
+        else:
+            fpath = find_latest("run-")
+
+        if not fpath or not os.path.isfile(fpath):
+            self._send_json({"file": None, "content": "", "lines": 0})
+            return
+
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.readlines()
+            content = "".join(all_lines[-tail:])
+            self._send_json({
+                "file": os.path.basename(fpath),
+                "content": content,
+                "lines": len(all_lines),
+                "showing": min(tail, len(all_lines)),
+            })
+        except Exception as e:
+            self._send_json({"file": os.path.basename(fpath), "content": str(e), "lines": 0})
 
     # ── Prompts API ────────────────────────────────────────────────
     def _safe_prompt_name(self, name: str) -> str | None:

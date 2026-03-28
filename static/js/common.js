@@ -136,7 +136,7 @@ document.addEventListener('keydown', function (e) {
       '<div style="background:var(--surface);padding:28px;max-width:420px;width:90%">' +
       '<h2 style="font-family:var(--font-display);color:var(--primary-lit);text-transform:uppercase;letter-spacing:.04em;margin-bottom:16px;font-size:1rem">KEYBOARD SHORTCUTS</h2>' +
       '<table style="width:100%;font-size:.85rem;border-collapse:separate;border-spacing:0 4px">' +
-      '<tr><td style="color:var(--secondary);font-family:var(--font-display);width:60px">1-5</td><td>Page navigation</td></tr>' +
+      '<tr><td style="color:var(--secondary);font-family:var(--font-display);width:60px">1-6</td><td>Page navigation</td></tr>' +
       '<tr><td style="color:var(--secondary);font-family:var(--font-display)">N</td><td>New item</td></tr>' +
       '<tr><td style="color:var(--secondary);font-family:var(--font-display)">ESC</td><td>Close modal</td></tr>' +
       '<tr><td style="color:var(--secondary);font-family:var(--font-display)">[ ]</td><td>Pagination (Logs/Tasks)</td></tr>' +
@@ -168,9 +168,9 @@ document.addEventListener('keydown', function (e) {
   }
 
   // ページナビゲーション: 1-5
-  var pages = ['/', '/tasks', '/logs', '/schedules', '/prompts'];
+  var pages = ['/', '/tasks', '/logs', '/schedules', '/prompts', '/debug-logs'];
   var num = parseInt(e.key);
-  if (num >= 1 && num <= 5) {
+  if (num >= 1 && num <= 6) {
     var target = pages[num - 1];
     if (window.location.pathname !== target) window.location.href = target;
     return;
