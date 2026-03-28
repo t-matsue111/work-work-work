@@ -5,12 +5,25 @@ set -euo pipefail
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
+# cron環境でキーチェーンからOAuth認証情報を読み込み
+if [ -z "${CLAUDE_CODE_CREDENTIALS:-}" ]; then
+  CLAUDE_CODE_CREDENTIALS="$(security find-generic-password -s 'Claude Code-credentials' -w 2>/dev/null || echo "")"
+  if [ -n "$CLAUDE_CODE_CREDENTIALS" ]; then
+    export CLAUDE_CODE_CREDENTIALS
+  fi
+fi
+
 # cron/ネスト実行時にClaude Codeのセッション検出を回避
 unset CLAUDECODE 2>/dev/null || true
 
 # --- ディレクトリ設定 ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
+
+# --- 一時停止チェック ---
+if [ -f "$PROJECT_DIR/.pause" ]; then
+  exit 0
+fi
 DB_FILE="$PROJECT_DIR/db/logs.db"
 TASKS_DB="$PROJECT_DIR/db/tasks.db"
 CRON_NEXT="$PROJECT_DIR/scripts/cron-next.py"

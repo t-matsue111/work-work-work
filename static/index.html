@@ -23,6 +23,7 @@
     <a href="/prompts">Prompts</a>
     <a href="/debug-logs">Debug</a>
   </nav>
+  <button id="pauseBtn" onclick="togglePause()" style="margin-left:auto;font-family:var(--font-display);font-size:.7rem;padding:5px 14px;border:1px solid var(--ghost);background:transparent;color:var(--text-secondary);cursor:pointer;text-transform:uppercase;letter-spacing:.04em">PAUSE</button>
   <div class="stats">TOTAL <span x-text="stats.total"></span> DONE <span x-text="stats.completion_rate + '%'"></span></div>
   <button class="btn-add" @click="openAddModal()">+ Add Task</button>
 </header>

@@ -167,6 +167,10 @@ class AppHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/status/unlock":
             self._handle_unlock()
+        elif path == "/api/status/pause":
+            self._handle_pause()
+        elif path == "/api/status/resume":
+            self._handle_resume()
         elif path == "/api/tasks":
             self._handle_create_task()
         elif path == "/api/schedules":
@@ -471,6 +475,8 @@ class AppHandler(BaseHTTPRequestHandler):
     # ── Status API ─────────────────────────────────────────────────
     LOCK_FILE = "/tmp/claude-task-runner.lock"
 
+    PAUSE_FILE = os.path.join(BASE_DIR, ".pause")
+
     def _handle_get_status(self):
         locked = os.path.isdir(self.LOCK_FILE)
         lock_age = 0
@@ -479,10 +485,22 @@ class AppHandler(BaseHTTPRequestHandler):
                 lock_age = int(datetime.now().timestamp() - os.stat(self.LOCK_FILE).st_mtime)
             except Exception:
                 pass
+        paused = os.path.isfile(self.PAUSE_FILE)
         self._send_json({
             "locked": locked,
             "lock_age_seconds": lock_age if locked else 0,
+            "paused": paused,
         })
+
+    def _handle_pause(self):
+        with open(self.PAUSE_FILE, "w") as f:
+            f.write(datetime.now().isoformat())
+        self._send_json({"paused": True})
+
+    def _handle_resume(self):
+        if os.path.isfile(self.PAUSE_FILE):
+            os.remove(self.PAUSE_FILE)
+        self._send_json({"paused": False})
 
     def _handle_unlock(self):
         import shutil

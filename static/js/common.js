@@ -207,43 +207,80 @@ function setField(id, val) {
   }
 }
 
-/* ── Lock status indicator ── */
-(function() {
-  var banner = null;
+/* ── Pause toggle ── */
+async function togglePause() {
+  var data = await api.get('/api/status');
+  if (data.paused) {
+    await api.post('/api/status/resume', {});
+  } else {
+    await api.post('/api/status/pause', {});
+  }
+  updatePauseBtn();
+  location.reload();
+}
 
-  async function checkLock() {
+async function updatePauseBtn() {
+  try {
+    var data = await api.get('/api/status');
+    var btn = document.getElementById('pauseBtn');
+    if (!btn) return;
+    if (data.paused) {
+      btn.textContent = 'RESUME';
+      btn.style.background = 'var(--primary)';
+      btn.style.color = '#fff';
+      btn.style.borderColor = 'var(--primary)';
+    } else {
+      btn.textContent = 'PAUSE';
+      btn.style.background = 'transparent';
+      btn.style.color = 'var(--text-secondary)';
+      btn.style.borderColor = '';
+    }
+  } catch(e) {}
+}
+document.addEventListener('DOMContentLoaded', updatePauseBtn);
+
+/* ── Status indicator (lock + pause) ── */
+(function() {
+  var statusBar = null;
+
+  function createBar() {
+    statusBar = document.createElement('div');
+    statusBar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:300;padding:8px 24px;font-family:var(--font-display);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;gap:16px';
+    document.body.appendChild(statusBar);
+    document.body.style.paddingTop = '36px';
+  }
+
+  function removeBar() {
+    if (statusBar) { statusBar.remove(); statusBar = null; document.body.style.paddingTop = ''; }
+  }
+
+  async function checkStatus() {
     try {
       var data = await api.get('/api/status');
-      if (data.locked) {
-        if (!banner) {
-          banner = document.createElement('div');
-          banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:300;background:var(--error);color:#fff;padding:8px 24px;font-family:var(--font-display);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;justify-content:space-between';
-          var span = document.createElement('span');
-          banner.appendChild(span);
-          var btn = document.createElement('button');
-          btn.textContent = 'FORCE UNLOCK';
-          btn.style.cssText = 'background:#fff;color:var(--error);border:none;padding:4px 12px;font-family:var(--font-display);font-size:.75rem;font-weight:600;cursor:pointer;text-transform:uppercase';
-          btn.onclick = async function() {
-            if (!confirm('ロックを強制解除しますか？')) return;
-            await api.post('/api/status/unlock', {});
-            checkLock();
-          };
-          banner.appendChild(btn);
-          document.body.appendChild(banner);
-          document.body.style.paddingTop = '36px';
-        }
-        var mins = Math.floor(data.lock_age_seconds / 60);
-        banner.querySelector('span').textContent = 'RUNNER LOCKED (' + mins + 'min ago)';
-      } else {
-        if (banner) {
-          banner.remove();
-          banner = null;
-          document.body.style.paddingTop = '';
-        }
+      if (!data.locked && !data.paused) { removeBar(); return; }
+
+      if (!statusBar) createBar();
+      var html = '';
+
+      if (data.paused) {
+        statusBar.style.background = 'var(--primary)';
+        html += '<span>RUNNER PAUSED</span>';
+        html += '<button onclick="api.post(\'/api/status/resume\',{}).then(function(){location.reload()})" style="background:#fff;color:var(--primary);border:none;padding:4px 12px;font-family:var(--font-display);font-size:.75rem;font-weight:600;cursor:pointer;text-transform:uppercase">RESUME</button>';
       }
+
+      if (data.locked) {
+        if (data.paused) html += '<span style="margin-left:16px;opacity:.8">|</span>';
+        else statusBar.style.background = 'var(--error)';
+        var mins = Math.floor(data.lock_age_seconds / 60);
+        html += '<span>LOCKED (' + mins + 'min)</span>';
+        html += '<button onclick="if(confirm(\'ロックを強制解除しますか？\'))api.post(\'/api/status/unlock\',{}).then(function(){location.reload()})" style="background:#fff;color:var(--error);border:none;padding:4px 12px;font-family:var(--font-display);font-size:.75rem;font-weight:600;cursor:pointer;text-transform:uppercase">UNLOCK</button>';
+      }
+
+      if (!data.paused && !data.locked) { removeBar(); return; }
+      statusBar.innerHTML = html;
     } catch(e) {}
   }
 
-  checkLock();
-  setInterval(checkLock, 15000);
+  checkStatus();
+  setInterval(checkStatus, 15000);
 })();
