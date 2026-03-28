@@ -427,13 +427,6 @@ tbody td{padding:8px 12px;border-bottom:1px solid #2a2a4e}
   <div class="stats-bar" id="statsBar"></div>
   <div class="cost-chart" id="costChart"><h3>日別コスト (USD)</h3><div class="chart-bars" id="chartBars"></div><div class="chart-labels" id="chartLabels"></div></div>
   <div class="filters">
-    <label>Runner:
-      <select id="filterRunner" onchange="loadLogs()">
-        <option value="">全て</option>
-        <option value="task_runner">task_runner</option>
-        <option value="email_checker">email_checker</option>
-      </select>
-    </label>
     <label>Status:
       <select id="filterStatus" onchange="loadLogs()">
         <option value="">全て</option>
@@ -443,12 +436,27 @@ tbody td{padding:8px 12px;border-bottom:1px solid #2a2a4e}
         <option value="skipped">skipped</option>
       </select>
     </label>
+    <label>Model:
+      <select id="filterModel" onchange="loadLogs()">
+        <option value="">全て</option>
+        <option value="sonnet">sonnet</option>
+        <option value="opus">opus</option>
+        <option value="haiku">haiku</option>
+      </select>
+    </label>
+    <label>Schedule:
+      <select id="filterSchedule" onchange="loadLogs()">
+        <option value="">全て</option>
+        <option value="spot">spot taskのみ</option>
+        <option value="schedule">scheduleのみ</option>
+      </select>
+    </label>
   </div>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Timestamp</th><th>Runner</th><th>Source</th><th>Type</th><th>Task Name</th><th>Status</th><th>Cost</th><th>Duration</th>
+          <th>Timestamp</th><th>Task Name</th><th>Status</th><th>Model</th><th>Cost</th><th>Duration</th><th>Source</th>
         </tr>
       </thead>
       <tbody id="logBody"></tbody>
@@ -508,26 +516,28 @@ async function loadStats() {
 }
 
 async function loadLogs() {
-  const runner = document.getElementById('filterRunner').value;
   const status = document.getElementById('filterStatus').value;
+  const model = document.getElementById('filterModel').value;
+  const schedule = document.getElementById('filterSchedule').value;
   let url = `/api/logs?limit=${PAGE_SIZE}&offset=${currentOffset}`;
-  if (runner) url += `&runner_type=${runner}`;
   if (status) url += `&status=${status}`;
+  if (model) url += `&model=${model}`;
+  if (schedule) url += `&schedule=${schedule}`;
   const res = await fetch(url);
   const logs = await res.json();
   const tbody = document.getElementById('logBody');
   tbody.innerHTML = '';
   logs.forEach(log => {
     const tr = document.createElement('tr');
+    const schedBadge = log.schedule_id ? '<span style="font-size:.65rem;background:#3a86ff33;color:#3a86ff;padding:1px 5px;border-radius:3px;margin-left:4px">schedule</span>' : '';
     tr.innerHTML = `
       <td>${esc(log.timestamp)}</td>
-      <td>${esc(log.runner_type)}</td>
-      <td>${esc(log.task_source || '-')}</td>
-      <td>${esc(log.task_type || '-')}</td>
-      <td>${esc(log.task_name || '-')}</td>
+      <td>${esc(log.task_name || '-')}${schedBadge}</td>
       <td><span class="${statusClass(log.status)}">${log.status}</span></td>
+      <td>${esc(log.model || '-')}</td>
       <td>${fmtCost(log.cost_usd)}</td>
-      <td>${fmtDuration(log.duration_seconds)}</td>`;
+      <td>${fmtDuration(log.duration_seconds)}</td>
+      <td>${esc(log.task_source || '-')}</td>`;
     tr.addEventListener('click', () => openLogDetail(log.id));
     tbody.appendChild(tr);
   });
@@ -547,11 +557,12 @@ async function openLogDetail(id) {
   const log = await res.json();
   document.getElementById('logDetailTitle').textContent = log.task_name || `Log #${log.id}`;
   const fields = [
-    ['Timestamp', log.timestamp], ['Runner', log.runner_type],
-    ['Source', log.task_source], ['Type', log.task_type],
-    ['Status', log.status], ['Model', log.model],
+    ['Timestamp', log.timestamp], ['Status', log.status],
+    ['Model', log.model], ['Source', log.task_source],
+    ['Type', log.task_type], ['Schedule ID', log.schedule_id || '-'],
     ['Cost', fmtCost(log.cost_usd)], ['Duration', fmtDuration(log.duration_seconds)],
     ['Input Tokens', log.input_tokens], ['Output Tokens', log.output_tokens],
+    ['Session ID', log.session_id], ['Runner', log.runner_type],
   ];
   const fullFields = [
     ['Result Summary', log.result_summary],
@@ -1540,17 +1551,22 @@ class KanbanHandler(BaseHTTPRequestHandler):
         try:
             where = []
             params = []
-            runner_type = qs.get("runner_type", [None])[0]
-            if runner_type:
-                where.append("runner_type = ?")
-                params.append(runner_type)
             status = qs.get("status", [None])[0]
             if status:
                 where.append("status = ?")
                 params.append(status)
+            model = qs.get("model", [None])[0]
+            if model:
+                where.append("model = ?")
+                params.append(model)
+            schedule = qs.get("schedule", [None])[0]
+            if schedule == "spot":
+                where.append("schedule_id IS NULL")
+            elif schedule == "schedule":
+                where.append("schedule_id IS NOT NULL")
             limit = int(qs.get("limit", [50])[0])
             offset = int(qs.get("offset", [0])[0])
-            sql = "SELECT id, timestamp, runner_type, task_source, task_type, task_name, status, cost_usd, duration_seconds FROM execution_logs"
+            sql = "SELECT id, timestamp, runner_type, task_source, task_type, task_name, status, cost_usd, duration_seconds, model, schedule_id FROM execution_logs"
             if where:
                 sql += " WHERE " + " AND ".join(where)
             sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
