@@ -206,3 +206,44 @@ function setField(id, val) {
     el.value = val || '';
   }
 }
+
+/* ── Lock status indicator ── */
+(function() {
+  var banner = null;
+
+  async function checkLock() {
+    try {
+      var data = await api.get('/api/status');
+      if (data.locked) {
+        if (!banner) {
+          banner = document.createElement('div');
+          banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:300;background:var(--error);color:#fff;padding:8px 24px;font-family:var(--font-display);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;justify-content:space-between';
+          var span = document.createElement('span');
+          banner.appendChild(span);
+          var btn = document.createElement('button');
+          btn.textContent = 'FORCE UNLOCK';
+          btn.style.cssText = 'background:#fff;color:var(--error);border:none;padding:4px 12px;font-family:var(--font-display);font-size:.75rem;font-weight:600;cursor:pointer;text-transform:uppercase';
+          btn.onclick = async function() {
+            if (!confirm('ロックを強制解除しますか？')) return;
+            await api.post('/api/status/unlock', {});
+            checkLock();
+          };
+          banner.appendChild(btn);
+          document.body.appendChild(banner);
+          document.body.style.paddingTop = '36px';
+        }
+        var mins = Math.floor(data.lock_age_seconds / 60);
+        banner.querySelector('span').textContent = 'RUNNER LOCKED (' + mins + 'min ago)';
+      } else {
+        if (banner) {
+          banner.remove();
+          banner = null;
+          document.body.style.paddingTop = '';
+        }
+      }
+    } catch(e) {}
+  }
+
+  checkLock();
+  setInterval(checkLock, 15000);
+})();

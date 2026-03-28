@@ -130,7 +130,11 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         # API ルーティング
-        if path == "/api/debug-logs":
+        if path == "/api/status":
+            self._handle_get_status()
+        elif path == "/api/status/unlock":
+            pass  # POST only
+        elif path == "/api/debug-logs":
             self._handle_get_debug_logs(qs)
         elif path == "/api/prompts":
             self._handle_get_prompts()
@@ -161,7 +165,9 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path == "/api/tasks":
+        if path == "/api/status/unlock":
+            self._handle_unlock()
+        elif path == "/api/tasks":
             self._handle_create_task()
         elif path == "/api/schedules":
             self._handle_create_schedule()
@@ -461,6 +467,30 @@ class AppHandler(BaseHTTPRequestHandler):
             self._send_json({"triggered": schedule_id, "next_run_at": now})
         finally:
             conn.close()
+
+    # ── Status API ─────────────────────────────────────────────────
+    LOCK_FILE = "/tmp/claude-task-runner.lock"
+
+    def _handle_get_status(self):
+        locked = os.path.isdir(self.LOCK_FILE)
+        lock_age = 0
+        if locked:
+            try:
+                lock_age = int(datetime.now().timestamp() - os.stat(self.LOCK_FILE).st_mtime)
+            except Exception:
+                pass
+        self._send_json({
+            "locked": locked,
+            "lock_age_seconds": lock_age if locked else 0,
+        })
+
+    def _handle_unlock(self):
+        import shutil
+        if os.path.isdir(self.LOCK_FILE):
+            shutil.rmtree(self.LOCK_FILE)
+            self._send_json({"unlocked": True})
+        else:
+            self._send_json({"unlocked": False, "message": "No lock found"})
 
     # ── Debug Logs API ─────────────────────────────────────────────
     def _handle_get_debug_logs(self, qs):
