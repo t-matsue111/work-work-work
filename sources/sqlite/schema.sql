@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   allowed_tools TEXT,
   mcp_config TEXT,
   work_dir TEXT,
+  archived INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime')),
   updated_at TEXT DEFAULT (datetime('now','localtime'))
 );

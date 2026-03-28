@@ -123,6 +123,7 @@ details .adv-grid input,details .adv-grid select{font-size:.84rem}
   <h1>WORK WORK WORK</h1>
   <nav>
     <a href="/" class="active">Kanban</a>
+    <a href="/tasks">Tasks</a>
     <a href="/logs">Logs</a>
     <a href="/schedules">Schedules</a>
     <a href="/prompts">Prompts</a>
@@ -220,6 +221,7 @@ details .adv-grid input,details .adv-grid select{font-size:.84rem}
     <div class="detail-field"><div class="label">Updated</div><div class="value" id="detailUpdated"></div></div>
     <div class="modal-actions">
       <button class="btn-delete" id="detailDeleteBtn">Delete</button>
+      <button class="btn-sm" id="detailArchiveBtn" style="background:var(--text-secondary);color:#fff;margin-right:auto;display:none">Archive</button>
       <button class="btn-cancel" onclick="closeModal('detailModal')">Close</button>
     </div>
   </div>
@@ -363,12 +365,174 @@ function openDetail(task) {
     closeModal('detailModal');
     loadTasks();
   };
+  const archBtn = document.getElementById('detailArchiveBtn');
+  if (task.status === 'completed' || task.status === 'error') {
+    archBtn.style.display = 'inline-block';
+    archBtn.onclick = async () => {
+      await fetch('/api/tasks/' + task.id, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({archived: 1}) });
+      closeModal('detailModal');
+      loadTasks();
+    };
+  } else {
+    archBtn.style.display = 'none';
+  }
   document.getElementById('detailModal').classList.add('active');
 }
 
 // 初期読み込み + 自動リフレッシュ
 loadTasks();
 setInterval(loadTasks, 30000);
+</script>
+</body>
+</html>"""
+
+
+# ── Tasks一覧 HTML テンプレート ────────────────────────────────────
+TASKS_HTML = r"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WORK WORK WORK - Tasks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#131313;--surface-lowest:#0e0e0e;--surface-low:#1c1b1b;--surface:#201f1f;--surface-highest:#353534;
+  --primary:#ff5717;--primary-lit:#ffb59e;--secondary:#c3f400;--error:#e74c3c;--info:#3a86ff;
+  --text:#e6e1e5;--text-secondary:#958f94;--ghost:rgba(92,64,55,.2);
+  --font-display:'Space Grotesk',sans-serif;--font-body:'Inter',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-body);background:var(--bg);color:var(--text);min-height:100vh}
+header{background:var(--surface-highest);padding:14px 24px;display:flex;align-items:center;gap:16px}
+header h1{font-family:var(--font-display);font-size:1.3rem;font-weight:700;color:var(--primary);letter-spacing:0.04em;text-transform:uppercase}
+header nav{display:flex;gap:6px;margin-left:16px}
+header nav a{font-family:var(--font-display);color:var(--text-secondary);background:transparent;border:1px solid var(--ghost);padding:7px 16px;border-radius:0;font-size:.8rem;font-weight:600;text-decoration:none;text-transform:uppercase;letter-spacing:0.05em;transition:background .2s,color .2s}
+header nav a:hover{background:var(--surface);color:var(--text)}
+header nav a.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.container{padding:20px 24px;max-width:1400px;margin:0 auto}
+.toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.toolbar h2{font-family:var(--font-display);font-size:.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em}
+.filters{display:flex;gap:12px;align-items:center}
+.filters select{font-family:var(--font-body);padding:6px 10px;border:none;border-bottom:2px solid var(--text-secondary);background:var(--surface-low);color:var(--text);font-size:.82rem;border-radius:0}
+.filters select:focus{outline:none;border-bottom-color:var(--secondary)}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:separate;border-spacing:0 2px;font-size:.84rem}
+thead th{background:var(--surface-highest);padding:11px 14px;text-align:left;font-family:var(--font-display);font-weight:600;font-size:.7rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;position:sticky;top:0}
+tbody tr{transition:background .15s}
+tbody tr:nth-child(even){background:var(--surface-low)}
+tbody tr:nth-child(odd){background:var(--bg)}
+tbody tr:hover{background:var(--surface)}
+tbody td{padding:10px 14px}
+.status-badge{padding:3px 10px;border-radius:0;font-family:var(--font-display);font-size:.7rem;font-weight:600;display:inline-block;text-transform:uppercase;letter-spacing:0.04em}
+.status-pending{background:rgba(255,87,23,.1);color:var(--primary)}
+.status-in_progress{background:rgba(58,134,255,.12);color:var(--info)}
+.status-completed{background:rgba(195,244,0,.1);color:var(--secondary)}
+.status-error{background:rgba(231,76,60,.12);color:var(--error)}
+.status-needs_review,.status-needs_clarification{background:rgba(255,181,158,.1);color:var(--primary-lit)}
+.archived-badge{font-family:var(--font-display);font-size:.6rem;background:var(--surface-highest);color:var(--text-secondary);padding:2px 6px;text-transform:uppercase;letter-spacing:0.04em;margin-left:6px}
+.btn-sm{font-family:var(--font-display);padding:5px 12px;border-radius:0;border:none;font-size:.7rem;cursor:pointer;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;transition:opacity .2s;background:var(--text-secondary);color:#fff}
+.btn-sm:hover{opacity:.8}
+.pagination{display:flex;gap:8px;margin-top:16px;align-items:center}
+.pagination button{font-family:var(--font-display);padding:6px 14px;border:1px solid var(--ghost);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:.8rem;text-transform:uppercase;border-radius:0}
+.pagination button:hover{background:var(--surface-low);color:var(--text)}
+.pagination button:disabled{opacity:.4;cursor:default}
+.pagination span{font-family:var(--font-display);font-size:.8rem;color:var(--text-secondary)}
+</style>
+</head>
+<body>
+<header>
+  <h1>WORK WORK WORK</h1>
+  <nav>
+    <a href="/">Kanban</a>
+    <a href="/tasks" class="active">Tasks</a>
+    <a href="/tasks">Tasks</a>
+    <a href="/logs">Logs</a>
+    <a href="/schedules">Schedules</a>
+    <a href="/prompts">Prompts</a>
+  </nav>
+</header>
+<div class="container">
+  <div class="toolbar">
+    <h2>All Tasks</h2>
+    <div class="filters">
+      <select id="filterStatus" onchange="loadTasks()">
+        <option value="">All Status</option>
+        <option value="pending">pending</option>
+        <option value="in_progress">in_progress</option>
+        <option value="completed">completed</option>
+        <option value="error">error</option>
+        <option value="needs_review">needs_review</option>
+        <option value="needs_clarification">needs_clarification</option>
+      </select>
+      <select id="filterArchived" onchange="loadTasks()">
+        <option value="active">Active Only</option>
+        <option value="archived">Archived Only</option>
+        <option value="all">All</option>
+      </select>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Name</th><th>Label</th><th>Priority</th><th>Status</th><th>Created</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="taskBody"></tbody>
+    </table>
+  </div>
+  <div class="pagination">
+    <button id="prevBtn" onclick="changePage(-1)">&larr; Prev</button>
+    <span id="pageInfo"></span>
+    <button id="nextBtn" onclick="changePage(1)">Next &rarr;</button>
+  </div>
+</div>
+<script>
+const PAGE_SIZE = 50;
+let currentOffset = 0;
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+async function loadTasks(){
+  const status=document.getElementById('filterStatus').value;
+  const arch=document.getElementById('filterArchived').value;
+  let url='/api/tasks?archived=' + (arch==='all'?'1':arch==='archived'?'1':'0');
+  const res=await fetch(url);
+  let tasks=await res.json();
+  if(status) tasks=tasks.filter(t=>t.status===status);
+  if(arch==='archived') tasks=tasks.filter(t=>t.archived===1);
+  else if(arch==='active') tasks=tasks.filter(t=>!t.archived);
+  const page=tasks.slice(currentOffset,currentOffset+PAGE_SIZE);
+  const tbody=document.getElementById('taskBody');
+  tbody.innerHTML='';
+  page.forEach(t=>{
+    const tr=document.createElement('tr');
+    const archBadge=t.archived?'<span class="archived-badge">archived</span>':'';
+    tr.innerHTML=`
+      <td style="font-family:var(--font-display)">${t.id}</td>
+      <td>${esc(t.task_name)}${archBadge}</td>
+      <td>${esc(t.task_type)}</td>
+      <td>${esc(t.priority)}</td>
+      <td><span class="status-badge status-${t.status}">${t.status}</span></td>
+      <td style="font-family:var(--font-display);font-size:.8rem">${esc(t.created_at||'')}</td>
+      <td>${t.archived?'<button class="btn-sm" onclick="unarchive('+t.id+')">Restore</button>':t.status==='completed'||t.status==='error'?'<button class="btn-sm" onclick="archive('+t.id+')">Archive</button>':''}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('pageInfo').textContent=(currentOffset+1)+' - '+(currentOffset+page.length)+' / '+tasks.length;
+  document.getElementById('prevBtn').disabled=currentOffset===0;
+  document.getElementById('nextBtn').disabled=currentOffset+PAGE_SIZE>=tasks.length;
+}
+function changePage(dir){currentOffset=Math.max(0,currentOffset+dir*PAGE_SIZE);loadTasks()}
+async function archive(id){
+  await fetch('/api/tasks/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({archived:1})});
+  loadTasks();
+}
+async function unarchive(id){
+  await fetch('/api/tasks/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({archived:0})});
+  loadTasks();
+}
+loadTasks();
 </script>
 </body>
 </html>"""
@@ -464,6 +628,7 @@ tbody td{padding:10px 14px}
   <h1>WORK WORK WORK</h1>
   <nav>
     <a href="/">Kanban</a>
+    <a href="/tasks">Tasks</a>
     <a href="/logs" class="active">Logs</a>
     <a href="/schedules">Schedules</a>
     <a href="/prompts">Prompts</a>
@@ -712,6 +877,7 @@ details summary{cursor:pointer;padding:12px 0;color:var(--text-secondary);font-f
   <h1>WORK WORK WORK</h1>
   <nav>
     <a href="/">Kanban</a>
+    <a href="/tasks">Tasks</a>
     <a href="/logs">Logs</a>
     <a href="/schedules" class="active">Schedules</a>
     <a href="/prompts">Prompts</a>
@@ -1079,6 +1245,7 @@ header nav a.active{background:var(--primary);color:#fff;border-color:var(--prim
   <h1>WORK WORK WORK</h1>
   <nav>
     <a href="/">Kanban</a>
+    <a href="/tasks">Tasks</a>
     <a href="/logs">Logs</a>
     <a href="/schedules">Schedules</a>
     <a href="/prompts" class="active">Prompts</a>
@@ -1255,6 +1422,8 @@ class KanbanHandler(BaseHTTPRequestHandler):
             self._send_html(KANBAN_HTML)
         elif path == "/logs":
             self._send_html(LOGS_HTML)
+        elif path == "/tasks":
+            self._send_html(TASKS_HTML)
         elif path == "/schedules":
             self._send_html(SCHEDULES_HTML)
         elif path == "/prompts":
@@ -1341,7 +1510,12 @@ class KanbanHandler(BaseHTTPRequestHandler):
     def _handle_get_tasks(self):
         conn = get_db(self.db_path)
         try:
-            rows = conn.execute("SELECT * FROM tasks ORDER BY created_at DESC").fetchall()
+            qs = parse_qs(urlparse(self.path).query)
+            include_archived = qs.get("archived", ["0"])[0] == "1"
+            if include_archived:
+                rows = conn.execute("SELECT * FROM tasks ORDER BY created_at DESC").fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM tasks WHERE COALESCE(archived, 0) = 0 ORDER BY created_at DESC").fetchall()
             self._send_json(rows_to_dicts(rows))
         finally:
             conn.close()
@@ -1401,7 +1575,7 @@ class KanbanHandler(BaseHTTPRequestHandler):
         if not data:
             self._send_json({"error": "No data"}, 400)
             return
-        allowed = {"task_name", "task_type", "priority", "status", "input", "result", "assigned_session_id", "started_at", "completed_at", "model", "timeout_seconds", "max_turns", "allowed_tools", "mcp_config", "work_dir"}
+        allowed = {"task_name", "task_type", "priority", "status", "input", "result", "assigned_session_id", "started_at", "completed_at", "model", "timeout_seconds", "max_turns", "allowed_tools", "mcp_config", "work_dir", "archived"}
         updates = {k: v for k, v in data.items() if k in allowed}
         if not updates:
             self._send_json({"error": "No valid fields"}, 400)
