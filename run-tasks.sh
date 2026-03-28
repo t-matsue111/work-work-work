@@ -493,6 +493,12 @@ if [ -n "$SCHEDULE_ID" ]; then
   fi
 fi
 
+# --- タスク名のフォールバック ---
+# スケジュール由来でtask_nameが空の場合、スケジュール名/タスク名をセット
+if [ -z "$TASK_NAME" ] && [ -n "$SCHEDULE_TASK_ID" ]; then
+  TASK_NAME="$(sqlite3 "$TASKS_DB" "SELECT task_name FROM tasks WHERE id = $SCHEDULE_TASK_ID;" 2>/dev/null || echo "")"
+fi
+
 # --- SQLiteへのログ記録 ---
 log "SQLiteにログを記録中..."
 
