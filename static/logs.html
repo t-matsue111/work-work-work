@@ -87,7 +87,7 @@
       <tbody>
         <template x-for="log in logs" :key="log.id">
           <tr @click="openLogDetail(log.id)" style="cursor:pointer">
-            <td x-text="log.timestamp"></td>
+            <td x-text="fmtLocalTime(log.timestamp)"></td>
             <td>
               <span x-text="log.task_name || '-'"></span>
               <span x-show="log.schedule_id" style="font-family:var(--font-display);font-size:.6rem;background:rgba(58,134,255,.1);color:var(--info);padding:2px 6px;border-radius:0;margin-left:6px;text-transform:uppercase;letter-spacing:0.04em">schedule</span>

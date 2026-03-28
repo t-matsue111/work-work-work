@@ -57,6 +57,14 @@ function relativeTime(dateStr) {
   return Math.floor(diff / 86400) + '\u65e5\u524d';
 }
 
+function fmtLocalTime(dateStr) {
+  if (!dateStr) return '-';
+  var d = new Date(dateStr.replace(' ', 'T'));
+  if (isNaN(d)) return dateStr;
+  var pad = function(n) { return n < 10 ? '0' + n : n; };
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
 function fmtCost(v) {
   return v != null ? '$' + v.toFixed(4) : '-';
 }
