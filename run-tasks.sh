@@ -29,8 +29,8 @@ WORK_DIR=""
 mkdir -p "$LOG_DIR"
 
 # --- ファイルログ設定 ---
-TIMESTAMP_FILE="$(date '+%Y%m%d-%H%M%S')"
-LOG_FILE="$LOG_DIR/run-${TIMESTAMP_FILE}.log"
+LOG_DATE="$(date '+%Y%m%d')"
+LOG_FILE="$LOG_DIR/run-${LOG_DATE}.log"
 
 # ログ関数: stdout/stderrとファイルの両方に出力
 log() {
