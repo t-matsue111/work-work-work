@@ -74,7 +74,7 @@ document.addEventListener('alpine:init', function () {
         var log = this.detailLog;
         if (!log) return [];
         return [
-          ['Task Name', log.task_name || '-'], ['Timestamp', fmtLocalTime(log.timestamp)],
+          ['Task', (log.task_external_id ? '#' + log.task_external_id + ' ' : '') + (log.task_name || '-')], ['Timestamp', fmtLocalTime(log.timestamp)],
           ['Status', log.status], ['Model', log.model],
           ['Source', log.task_source], ['Type', log.task_type],
           ['Schedule ID', log.schedule_id || '-'],

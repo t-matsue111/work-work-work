@@ -89,7 +89,7 @@ document.addEventListener('alpine:init', function () {
         div.dataset.id = task.id;
         div.dataset.status = task.status;
         div.innerHTML =
-          '<div class="card-title">' + esc(task.task_name) + '</div>' +
+          '<div class="card-title"><span style="font-family:var(--font-display);font-size:.7rem;color:var(--text-secondary);margin-right:6px">#' + task.id + '</span>' + esc(task.task_name) + '</div>' +
           '<div class="card-meta">' +
           '  <span class="' + badgeClass(task.task_type) + '">' + task.task_type + '</span>' +
           '  <span class="priority-dot priority-' + task.priority + '" title="' + task.priority + '"></span>' +

@@ -591,7 +591,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 where.append("schedule_id IS NOT NULL")
             limit = int(qs.get("limit", [50])[0])
             offset = int(qs.get("offset", [0])[0])
-            sql = "SELECT id, timestamp, runner_type, task_source, task_type, task_name, status, cost_usd, duration_seconds, model, schedule_id FROM execution_logs"
+            sql = "SELECT id, timestamp, runner_type, task_source, task_type, task_name, task_external_id, status, cost_usd, duration_seconds, model, schedule_id FROM execution_logs"
             if where:
                 sql += " WHERE " + " AND ".join(where)
             sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
