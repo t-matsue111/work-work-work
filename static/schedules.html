@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WORK WORK WORK - Schedules</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="/static/js/common.js"></script>
+<script src="/static/js/schedules.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="schedulesApp">
+<header>
+  <h1>WORK WORK WORK</h1>
+  <nav>
+    <a href="/">Kanban</a>
+    <a href="/tasks">Tasks</a>
+    <a href="/logs">Logs</a>
+    <a href="/schedules" class="active">Schedules</a>
+    <a href="/prompts">Prompts</a>
+  </nav>
+</header>
+<div class="container">
+  <div class="toolbar">
+    <h2>Schedules</h2>
+    <button class="btn-add" @click="openAddModal()">+ Add Schedule</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Enabled</th><th>Name</th><th>Cron</th><th>Backend</th><th>Type</th><th>Next Run</th><th>Status</th><th>Failures</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="s in schedules" :key="s.id">
+          <tr style="cursor:pointer" @click="openEdit(s.id)">
+            <td style="font-family:var(--font-display)" x-text="s.id"></td>
+            <td>
+              <span class="toggle"
+                @click.stop="toggleEnabled(s.id, s.enabled ? 0 : 1)"
+                :style="'color:' + (s.enabled ? 'var(--secondary)' : 'var(--text-secondary)')"
+                x-text="s.enabled ? '\u25cf' : '\u25cb'"></span>
+            </td>
+            <td style="color:var(--primary-lit)" x-text="s.name"></td>
+            <td><code style="font-family:var(--font-display);font-size:.8rem;color:var(--text-secondary)" x-text="s.cron_expr"></code></td>
+            <td style="font-family:var(--font-display);font-size:.8rem" x-text="s.backend + '+' + s.model"></td>
+            <td x-text="s.task_type"></td>
+            <td style="font-family:var(--font-display);font-size:.8rem" x-text="s.next_run_at || '-'"></td>
+            <td>
+              <template x-if="s.last_status">
+                <span :class="'status-badge status-' + s.last_status" x-text="s.last_status"></span>
+              </template>
+              <template x-if="!s.last_status">
+                <span>-</span>
+              </template>
+            </td>
+            <td style="font-family:var(--font-display)" x-text="s.consecutive_failures + '/' + s.max_consecutive_failures"></td>
+            <td>
+              <button class="btn-sm btn-run" @click.stop="triggerRun(s.id)">Run</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 追加/編集モーダル -->
+<div class="modal-overlay schedules-modal" :class="{ active: showModal }" @click.self="showModal = false">
+  <div class="modal">
+    <h2 x-text="editingId ? 'EDIT SCHEDULE' : 'ADD SCHEDULE'"></h2>
+    <label>Name *</label>
+    <input type="text" id="addName" x-model="form.name" placeholder="例: 朝のメールチェック、週次Sentryレビュー">
+    <label>Cron Expression *</label>
+    <select x-model="form.cron_preset" @change="applyCronPreset()" style="margin-bottom:6px">
+      <option value="">-- Preset --</option>
+      <option value="*/10 * * * *">10分毎</option>
+      <option value="*/30 * * * *">30分毎</option>
+      <option value="0 * * * *">毎時0分</option>
+      <option value="0 9 * * *">毎日 9:00</option>
+      <option value="0 9 * * 1-5">平日 9:00</option>
+      <option value="7 8-20 * * 1-5">平日 8:07〜20:07（毎時7分）</option>
+      <option value="0 9,15 * * 1-5">平日 9:00 と 15:00</option>
+      <option value="0 9 * * 1">毎週月曜 9:00</option>
+      <option value="0 0 1 * *">毎月1日 0:00</option>
+    </select>
+    <input type="text" x-model="form.cron_expr" placeholder="分 時 日 月 曜日（例: 7 8-20 * * 1-5）">
+    <div class="form-row">
+      <div><label>Label <span class="sub-label">分類用</span></label>
+      <input type="text" x-model="form.task_type" list="typeList" placeholder="例: research, email_check">
+      <datalist id="typeList">
+        <option value="research">技術調査・コードベース分析</option>
+        <option value="planning">要件→実装計画作成</option>
+        <option value="code_review">PRレビューコメント投稿</option>
+        <option value="sentry_analysis">Sentryイシュー原因調査</option>
+        <option value="email_check">メール確認・要約</option>
+      </datalist></div>
+      <div><label>Priority <span class="sub-label">spotタスクより後に処理</span></label>
+      <select x-model="form.priority">
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+        <option value="low">low</option>
+      </select></div>
+    </div>
+    <div class="form-row">
+      <div><label>Backend</label>
+      <select x-model="form.backend">
+        <option value="claude">claude</option>
+        <option value="ollama">ollama</option>
+        <option value="codex">codex</option>
+      </select></div>
+      <div><label>Model</label>
+      <select x-model="form.model">
+        <option value="sonnet" selected>sonnet</option>
+        <option value="opus">opus</option>
+        <option value="haiku">haiku</option>
+      </select></div>
+    </div>
+    <label>Prompt</label>
+    <textarea x-model="form.prompt" placeholder="Claudeへの指示内容を記述&#10;&#10;例: 未読メールを確認し、重要なものを要約してください"></textarea>
+    <label>Prompt File <span class="sub-label">（プロンプト欄が空の場合にこのファイルを使用。<a href="/prompts" style="color:var(--primary-lit)">Prompts</a>で管理）</span></label>
+    <select x-model="form.prompt_file" style="margin-bottom:2px">
+      <option value="">-- なし（上のプロンプト欄を使用）--</option>
+      <template x-for="p in promptFiles" :key="p.name">
+        <option :value="'prompts/' + p.name" x-text="p.name + ' (' + p.size + 'B)'"></option>
+      </template>
+    </select>
+    <div class="form-row">
+      <div><label>MCP Config <span class="sub-label">外部サービス連携</span></label>
+      <input type="text" x-model="form.mcp_config" list="mcpList" placeholder="なし（標準ツールのみ）">
+      <datalist id="mcpList">
+        <option value="mcp-config-email.json">Google Workspace（Gmail等）</option>
+        <option value="mcp-config-sentry.json">Sentry</option>
+        <option value="sources/notion/mcp-config.json">Notion</option>
+        <option value="/Users/t.matsue/project/manager/truckers_manager/.mcp.json">truckers_manager（Sentry+Notion+Serena）</option>
+      </datalist></div>
+      <div><label>Allowed Tools <span class="sub-label">Claudeが使えるツール</span></label>
+      <select x-model="form.tools_preset" @change="applyToolsPreset()">
+        <option value="">標準（Read,Grep,検索等）</option>
+        <option value="Read Grep Glob WebSearch WebFetch Bash(sqlite3:*) Bash(curl:*)">標準 + DB操作 + curl</option>
+        <option value="Read Grep Glob WebSearch WebFetch Bash(git:*) Bash(gh:*)">標準 + Git + GitHub CLI</option>
+        <option value="mcp__google_workspace_mcp__search_gmail_messages,mcp__google_workspace_mcp__get_gmail_message_content,mcp__google_workspace_mcp__get_gmail_messages_content_batch,mcp__google_workspace_mcp__get_events,mcp__google_workspace_mcp__list_tasks">Gmail + Calendar + Tasks（読み取り専用）</option>
+        <option value="Read Grep Glob WebSearch WebFetch mcp__sentry__search_issues mcp__sentry__get_sentry_resource">Sentry（issue検索・閲覧）</option>
+      </select>
+      <input type="text" x-model="form.allowed_tools" placeholder="カスタム指定時のみ入力" style="margin-top:4px;font-size:.8rem"></div>
+    </div>
+
+    <!-- 詳細設定（折りたたみ） -->
+    <details>
+      <summary>Advanced Settings</summary>
+      <div class="form-row">
+        <div><label>Timeout (sec) <span class="sub-label">処理の制限時間</span></label>
+        <input type="number" x-model="form.timeout_seconds">
+        <div class="hint">300秒=5分。長い調査は600秒程度に</div></div>
+        <div><label>Max Turns <span class="sub-label">Claudeの思考回数上限</span></label>
+        <input type="number" x-model="form.max_turns">
+        <div class="hint">1ターン=1回のツール使用。通常30で十分</div></div>
+      </div>
+      <div class="form-row">
+        <div><label>Max Failures</label>
+        <input type="number" x-model="form.max_consecutive_failures">
+        <div class="hint">この回数連続で失敗すると自動で無効化</div></div>
+        <div><label>Persistent Session <span class="sub-label">前回の会話を引き継ぐ</span></label>
+        <select x-model="form.session_persistent"><option value="0">いいえ（毎回新規）</option><option value="1">はい（前回から継続）</option></select>
+        <div class="hint">メールチェック等、文脈を保持したい場合にオン</div></div>
+      </div>
+      <label>Work Directory <span class="sub-label">別プロジェクトのコードを対象にする場合</span></label>
+      <input type="text" x-model="form.work_dir" placeholder="例: /Users/t.matsue/project/my-app（省略時はこのプロジェクト）">
+      <div class="hint" style="margin-bottom:14px">Claudeがファイルを読み書きするルートディレクトリ</div>
+    </details>
+    <div class="modal-actions">
+      <button class="btn-sm btn-del" x-show="editingId" style="margin-right:auto" @click="deleteEditing()">DELETE</button>
+      <button class="btn-cancel" @click="showModal = false">Cancel</button>
+      <button class="btn-primary" @click="submitForm()" x-text="editingId ? 'SAVE' : 'ADD'"></button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

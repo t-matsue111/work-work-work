@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WORK WORK WORK - Prompts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="/static/js/common.js"></script>
+<script src="/static/js/prompts.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="promptsApp">
+<header>
+  <h1>WORK WORK WORK</h1>
+  <nav>
+    <a href="/">Kanban</a>
+    <a href="/tasks">Tasks</a>
+    <a href="/logs">Logs</a>
+    <a href="/schedules">Schedules</a>
+    <a href="/prompts" class="active">Prompts</a>
+  </nav>
+</header>
+<div class="container prompts-container">
+  <div class="toolbar">
+    <h2>Prompts</h2>
+    <button class="btn-add" @click="openNewModal()">+ New Prompt</button>
+  </div>
+  <div class="prompt-grid">
+    <template x-if="prompts.length === 0">
+      <div style="color:var(--text-secondary);padding:20px;font-family:var(--font-body)">プロンプトファイルがありません。「+ New Prompt」から追加できます。</div>
+    </template>
+    <template x-for="p in prompts" :key="p.name">
+      <div class="prompt-card" @click="openEditModal(p.name)">
+        <h3 x-text="p.name"></h3>
+        <div class="meta" x-text="promptLines(p.content) + ' lines / ' + p.size + 'B / ' + (p.modified || '')"></div>
+        <div class="preview" x-text="promptPreview(p.content)"></div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<!-- 編集モーダル -->
+<div class="modal-overlay prompts-modal" :class="{ active: showModal }" @click.self="showModal = false">
+  <div class="modal">
+    <h2 x-text="editingFile ? editingFile : 'New Prompt'"></h2>
+    <label>Filename</label>
+    <input type="text" id="editName" x-model="form.name" placeholder="例: weekly-sentry-review" :disabled="nameDisabled">
+    <div class="hint">.txt は自動付与。英数字・ハイフン・アンダースコアのみ</div>
+    <label>Content</label>
+    <textarea id="editContent" x-model="form.content" placeholder="Claudeへの指示内容を記述..."></textarea>
+    <div class="modal-actions">
+      <button class="btn-delete" x-show="editingFile" style="margin-right:auto" @click="deletePrompt()">Delete</button>
+      <button class="btn-cancel" @click="showModal = false">Cancel</button>
+      <button class="btn-primary" @click="savePrompt()">Save</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

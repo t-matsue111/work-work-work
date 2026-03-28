@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WORK WORK WORK - Kanban</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="/static/js/common.js"></script>
+<script src="/static/js/kanban.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="kanbanApp">
+<header>
+  <h1>WORK WORK WORK</h1>
+  <nav>
+    <a href="/" class="active">Kanban</a>
+    <a href="/tasks">Tasks</a>
+    <a href="/logs">Logs</a>
+    <a href="/schedules">Schedules</a>
+    <a href="/prompts">Prompts</a>
+  </nav>
+  <div class="stats">TOTAL <span x-text="stats.total"></span> DONE <span x-text="stats.completion_rate + '%'"></span></div>
+  <button class="btn-add" @click="openAddModal()">+ Add Task</button>
+</header>
+<div class="kanban-board" id="board">
+  <div class="kanban-column col-pending" data-status="pending">
+    <div class="kanban-column-header">PENDING <span class="count" id="cnt-pending">0</span></div>
+    <div class="kanban-column-body" id="col-pending"></div>
+  </div>
+  <div class="kanban-column col-in_progress" data-status="in_progress">
+    <div class="kanban-column-header">IN PROGRESS <span class="count" id="cnt-in_progress">0</span></div>
+    <div class="kanban-column-body" id="col-in_progress"></div>
+  </div>
+  <div class="kanban-column col-completed" data-status="completed">
+    <div class="kanban-column-header">DONE <span class="count" id="cnt-completed">0</span></div>
+    <div class="kanban-column-body" id="col-completed"></div>
+  </div>
+  <div class="kanban-column col-error" data-status="error">
+    <div class="kanban-column-header">ERROR <span class="count" id="cnt-error">0</span></div>
+    <div class="kanban-column-body" id="col-error"></div>
+  </div>
+  <div class="kanban-column col-review" data-status="needs_review">
+    <div class="kanban-column-header">REVIEW <span class="count" id="cnt-review">0</span></div>
+    <div class="kanban-column-body" id="col-review"></div>
+  </div>
+</div>
+
+<!-- 追加モーダル -->
+<div class="modal-overlay" :class="{ active: showAddModal }" @click.self="showAddModal = false">
+  <div class="modal">
+    <h2>Add Task</h2>
+    <label>Task Name</label>
+    <input type="text" id="addName" x-model="addForm.task_name" placeholder="タスク名を入力" @keydown.enter="submitAdd()">
+    <label>Label</label>
+    <input type="text" x-model="addForm.task_type" list="kanbanTypeList" placeholder="例: research, email_check">
+    <datalist id="kanbanTypeList">
+      <option value="research">技術調査・コードベース分析</option>
+      <option value="planning">要件→実装計画作成</option>
+      <option value="code_review">PRレビューコメント投稿</option>
+      <option value="sentry_analysis">Sentryイシュー原因調査</option>
+      <option value="email_check">メール確認・要約</option>
+    </datalist>
+    <label>Priority</label>
+    <select x-model="addForm.priority">
+      <option value="medium">medium</option>
+      <option value="high">high</option>
+      <option value="low">low</option>
+    </select>
+    <label>Input</label>
+    <textarea x-model="addForm.input" placeholder="タスクの詳細情報"></textarea>
+    <details>
+      <summary>Advanced Settings</summary>
+      <div class="adv-grid">
+        <div><label>Model</label>
+        <select x-model="addForm.model">
+          <option value="">Default (sonnet)</option>
+          <option value="opus">opus</option>
+          <option value="haiku">haiku</option>
+        </select></div>
+        <div><label>MCP Config</label>
+        <input type="text" x-model="addForm.mcp_config" list="kanbanMcpList" placeholder="None">
+        <datalist id="kanbanMcpList">
+          <option value="mcp-config-email.json">Google Workspace</option>
+          <option value="mcp-config-sentry.json">Sentry</option>
+          <option value="sources/notion/mcp-config.json">Notion</option>
+        </datalist></div>
+        <div><label>Timeout (sec)</label>
+        <input type="number" x-model="addForm.timeout_seconds" placeholder="300"></div>
+        <div><label>Max Turns</label>
+        <input type="number" x-model="addForm.max_turns" placeholder="30"></div>
+      </div>
+      <label>Work Directory</label>
+      <input type="text" x-model="addForm.work_dir" placeholder="省略時はこのプロジェクト" style="margin-bottom:12px">
+      <label>Allowed Tools</label>
+      <input type="text" x-model="addForm.allowed_tools" placeholder="省略時はソースのデフォルト" style="margin-bottom:14px">
+    </details>
+    <div class="modal-actions">
+      <button class="btn-cancel" @click="showAddModal = false">Cancel</button>
+      <button class="btn-primary" @click="submitAdd()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- 詳細モーダル -->
+<div class="modal-overlay" :class="{ active: showDetailModal }" @click.self="showDetailModal = false" x-show="showDetailModal">
+  <div class="modal" x-show="detailTask">
+    <h2 x-text="detailTask ? detailTask.task_name : ''"></h2>
+    <div class="card-meta" style="margin-bottom:16px">
+      <template x-if="detailTask">
+        <span>
+          <span :class="badgeClass(detailTask.task_type)" x-text="detailTask.task_type"></span>
+          <span :class="'priority-dot priority-' + detailTask.priority"></span>
+          <span style="font-family:var(--font-display);font-size:.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em" x-text="'Status: ' + detailTask.status"></span>
+        </span>
+      </template>
+    </div>
+    <div class="detail-field"><div class="label">Input</div><div class="value" x-text="detailTask ? (detailTask.input || '(なし)') : ''"></div></div>
+    <div class="detail-field"><div class="label">Result</div><div class="value" x-text="detailTask ? (detailTask.result || '(なし)') : ''"></div></div>
+    <div class="detail-field"><div class="label">Created</div><div class="value" x-text="detailTask ? (detailTask.created_at || '') : ''"></div></div>
+    <div class="detail-field"><div class="label">Updated</div><div class="value" x-text="detailTask ? (detailTask.updated_at || '') : ''"></div></div>
+    <div class="modal-actions">
+      <button class="btn-delete" @click="deleteTask()">Delete</button>
+      <button class="btn-sm" x-show="canArchive()" @click="archiveTask()" style="background:var(--text-secondary);color:#fff;margin-right:auto">Archive</button>
+      <button class="btn-cancel" @click="showDetailModal = false">Close</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WORK WORK WORK - Tasks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="/static/js/common.js"></script>
+<script src="/static/js/tasks.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="tasksApp">
+<header>
+  <h1>WORK WORK WORK</h1>
+  <nav>
+    <a href="/">Kanban</a>
+    <a href="/tasks" class="active">Tasks</a>
+    <a href="/logs">Logs</a>
+    <a href="/schedules">Schedules</a>
+    <a href="/prompts">Prompts</a>
+  </nav>
+</header>
+<div class="container">
+  <div class="toolbar">
+    <h2>All Tasks</h2>
+    <div class="filters">
+      <select x-model="filterStatus" @change="resetAndLoad()">
+        <option value="">All Status</option>
+        <option value="pending">pending</option>
+        <option value="in_progress">in_progress</option>
+        <option value="completed">completed</option>
+        <option value="error">error</option>
+        <option value="needs_review">needs_review</option>
+        <option value="needs_clarification">needs_clarification</option>
+      </select>
+      <select x-model="filterArchived" @change="resetAndLoad()">
+        <option value="active">Active Only</option>
+        <option value="archived">Archived Only</option>
+        <option value="all">All</option>
+      </select>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Name</th><th>Label</th><th>Priority</th><th>Status</th><th>Created</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="t in tasks" :key="t.id">
+          <tr>
+            <td style="font-family:var(--font-display)" x-text="t.id"></td>
+            <td>
+              <span x-text="t.task_name"></span>
+              <span x-show="t.archived" class="archived-badge">archived</span>
+            </td>
+            <td x-text="t.task_type"></td>
+            <td x-text="t.priority"></td>
+            <td><span :class="'status-badge status-' + t.status" x-text="t.status"></span></td>
+            <td style="font-family:var(--font-display);font-size:.8rem" x-text="t.created_at || ''"></td>
+            <td>
+              <template x-if="t.archived">
+                <button class="btn-sm" @click="unarchive(t.id)">Restore</button>
+              </template>
+              <template x-if="!t.archived && (t.status === 'completed' || t.status === 'error')">
+                <button class="btn-sm" @click="archive(t.id)">Archive</button>
+              </template>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination">
+    <button :disabled="!hasPrev" @click="changePage(-1)">&larr; Prev</button>
+    <span x-text="pageInfo"></span>
+    <button :disabled="!hasNext" @click="changePage(1)">Next &rarr;</button>
+  </div>
+</div>
+</body>
+</html>
