@@ -734,10 +734,10 @@ details summary{cursor:pointer;padding:12px 0;color:var(--text-secondary);font-f
   </div>
 </div>
 
-<!-- 追加モーダル -->
+<!-- 追加/編集モーダル -->
 <div class="modal-overlay" id="addModal">
   <div class="modal">
-    <h2>Add Schedule</h2>
+    <h2 id="modalTitle">Add Schedule</h2>
     <label>Name *</label>
     <input type="text" id="addName" placeholder="例: 朝のメールチェック、週次Sentryレビュー">
     <label>Cron Expression *</label>
@@ -835,25 +835,30 @@ details summary{cursor:pointer;padding:12px 0;color:var(--text-secondary);font-f
       <div class="hint" style="margin-bottom:14px">Claudeがファイルを読み書きするルートディレクトリ</div>
     </details>
     <div class="modal-actions">
+      <button class="btn-sm btn-del" id="modalDeleteBtn" style="margin-right:auto;display:none" onclick="deleteEditing()">DELETE</button>
       <button class="btn-cancel" onclick="closeModal('addModal')">Cancel</button>
-      <button class="btn-primary" onclick="submitAdd()">Add</button>
-    </div>
-  </div>
-</div>
-
-<!-- 詳細モーダル -->
-<div class="modal-overlay" id="detailModal">
-  <div class="modal">
-    <h2 id="detailTitle"></h2>
-    <div id="detailContent"></div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModal('detailModal')">Close</button>
+      <button class="btn-primary" id="modalSubmitBtn" onclick="submitForm()">Add</button>
     </div>
   </div>
 </div>
 
 <script>
+let editingId = null; // null=新規, number=編集
+
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function setField(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (el.tagName === 'SELECT') {
+    for (let i = 0; i < el.options.length; i++) {
+      if (el.options[i].value === String(val || '')) { el.selectedIndex = i; return; }
+    }
+    el.selectedIndex = 0;
+  } else {
+    el.value = val || '';
+  }
+}
 
 async function loadSchedules() {
   const res = await fetch('/api/schedules');
@@ -865,8 +870,8 @@ async function loadSchedules() {
     const statusCls = s.last_status ? 'status-badge status-' + s.last_status : '';
     tr.innerHTML = `
       <td style="font-family:var(--font-display)">${s.id}</td>
-      <td><span class="toggle" onclick="toggleEnabled(${s.id}, ${s.enabled ? 0 : 1})" style="color:${s.enabled ? 'var(--secondary)' : 'var(--text-secondary)'}">${s.enabled ? '\u25cf' : '\u25cb'}</span></td>
-      <td style="cursor:pointer;color:var(--primary-lit)" onclick="openDetail(${s.id})">${esc(s.name)}</td>
+      <td><span class="toggle" onclick="event.stopPropagation();toggleEnabled(${s.id}, ${s.enabled ? 0 : 1})" style="color:${s.enabled ? 'var(--secondary)' : 'var(--text-secondary)'}">${s.enabled ? '\u25cf' : '\u25cb'}</span></td>
+      <td style="cursor:pointer;color:var(--primary-lit)">${esc(s.name)}</td>
       <td><code style="font-family:var(--font-display);font-size:.8rem;color:var(--text-secondary)">${esc(s.cron_expr)}</code></td>
       <td style="font-family:var(--font-display);font-size:.8rem">${esc(s.backend)}+${esc(s.model)}</td>
       <td>${esc(s.task_type)}</td>
@@ -874,9 +879,10 @@ async function loadSchedules() {
       <td>${s.last_status ? '<span class="' + statusCls + '">' + s.last_status + '</span>' : '-'}</td>
       <td style="font-family:var(--font-display)">${s.consecutive_failures}/${s.max_consecutive_failures}</td>
       <td>
-        <button class="btn-sm btn-run" onclick="triggerRun(${s.id})">Run</button>
-        <button class="btn-sm btn-del" onclick="deleteSchedule(${s.id}, '${esc(s.name)}')">Del</button>
+        <button class="btn-sm btn-run" onclick="event.stopPropagation();triggerRun(${s.id})">Run</button>
       </td>`;
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', () => openEdit(s.id));
     tbody.appendChild(tr);
   });
 }
@@ -889,47 +895,64 @@ async function toggleEnabled(id, newVal) {
 async function triggerRun(id) {
   await fetch('/api/schedules/' + id + '/trigger', { method:'POST' });
   loadSchedules();
-  alert('手動トリガーしました。次のrun-tasks.sh実行時に処理されます。');
 }
 
-async function deleteSchedule(id, name) {
-  if (!confirm('スケジュール "' + name + '" を削除しますか？')) return;
-  await fetch('/api/schedules/' + id, { method:'DELETE' });
-  loadSchedules();
+function resetForm() {
+  ['addName','addCron','addType','addPrompt','addWorkDir','addMcpConfig','addTools'].forEach(id => setField(id, ''));
+  setField('addPriority', 'medium');
+  setField('addBackend', 'claude');
+  setField('addModel', 'sonnet');
+  setField('addTimeout', '300');
+  setField('addMaxTurns', '30');
+  setField('addMaxFailures', '3');
+  setField('addPersistent', '0');
+  setField('addPromptFile', '');
+  setField('addToolsPreset', '');
+  setField('addCronPreset', '');
 }
 
-async function openDetail(id) {
+function openAddModal() {
+  editingId = null;
+  resetForm();
+  document.getElementById('modalTitle').textContent = 'ADD SCHEDULE';
+  document.getElementById('modalSubmitBtn').textContent = 'ADD';
+  document.getElementById('modalDeleteBtn').style.display = 'none';
+  document.getElementById('addModal').classList.add('active');
+  document.getElementById('addName').focus();
+}
+
+async function openEdit(id) {
   const res = await fetch('/api/schedules/' + id);
   if (!res.ok) return;
   const s = await res.json();
-  document.getElementById('detailTitle').textContent = s.name;
-  const fields = [
-    ['ID', s.id], ['有効', s.enabled ? 'はい' : 'いいえ'], ['cron式', s.cron_expr],
-    ['種別', s.task_type], ['優先度', s.priority], ['バックエンド', s.backend + '+' + s.model],
-    ['タイムアウト', s.timeout_seconds + '秒'], ['最大ターン', s.max_turns],
-    ['セッション永続', s.session_persistent ? 'はい' : 'いいえ'],
-    ['作業ディレクトリ', s.work_dir || '-'], ['MCP設定', s.mcp_config || '-'],
-    ['許可ツール', s.allowed_tools || '-'],
-    ['最終実行', s.last_run_at || '-'], ['次回実行', s.next_run_at || '-'],
-    ['最終状態', s.last_status || '-'], ['連続失敗', s.consecutive_failures + '/' + s.max_consecutive_failures],
-    ['作成日時', s.created_at], ['更新日時', s.updated_at],
-  ];
-  const fullFields = [
-    ['プロンプト', s.prompt], ['プロンプトファイル', s.prompt_file],
-  ];
-  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-  html += fields.map(([l,v]) => `<div class="detail-field"><div class="label">${l}</div><div class="value">${esc(String(v != null ? v : '-'))}</div></div>`).join('');
-  html += '</div>';
-  html += fullFields.map(([l,v]) => `<div class="detail-field"><div class="label">${l}</div><div class="value">${esc(String(v || '-'))}</div></div>`).join('');
-  document.getElementById('detailContent').innerHTML = html;
-  document.getElementById('detailModal').classList.add('active');
+  editingId = id;
+
+  setField('addName', s.name);
+  setField('addCron', s.cron_expr);
+  setField('addType', s.task_type);
+  setField('addPriority', s.priority);
+  setField('addBackend', s.backend);
+  setField('addModel', s.model);
+  setField('addPrompt', s.prompt);
+  setField('addPromptFile', s.prompt_file);
+  setField('addMcpConfig', s.mcp_config);
+  setField('addTools', s.allowed_tools);
+  setField('addTimeout', s.timeout_seconds);
+  setField('addMaxTurns', s.max_turns);
+  setField('addMaxFailures', s.max_consecutive_failures);
+  setField('addPersistent', s.session_persistent);
+  setField('addWorkDir', s.work_dir);
+
+  document.getElementById('modalTitle').textContent = 'EDIT SCHEDULE';
+  document.getElementById('modalSubmitBtn').textContent = 'SAVE';
+  document.getElementById('modalDeleteBtn').style.display = 'inline-block';
+  document.getElementById('addModal').classList.add('active');
 }
 
-function openAddModal() { document.getElementById('addModal').classList.add('active'); document.getElementById('addName').focus(); }
 function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 document.querySelectorAll('.modal-overlay').forEach(m => m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); }));
 
-async function submitAdd() {
+async function submitForm() {
   const name = document.getElementById('addName').value.trim();
   const cron = document.getElementById('addCron').value.trim();
   if (!name) return alert('名前を入力してください');
@@ -951,17 +974,23 @@ async function submitAdd() {
     max_consecutive_failures: parseInt(document.getElementById('addMaxFailures').value) || 3,
     session_persistent: parseInt(document.getElementById('addPersistent').value) || 0,
   };
-  const res = await fetch('/api/schedules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+
+  let res;
+  if (editingId) {
+    res = await fetch('/api/schedules/' + editingId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  } else {
+    res = await fetch('/api/schedules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  }
   if (!res.ok) { const e = await res.json(); return alert('エラー: ' + (e.error || 'Unknown')); }
   closeModal('addModal');
-  document.getElementById('addName').value = '';
-  document.getElementById('addCron').value = '';
-  document.getElementById('addPrompt').value = '';
-  document.getElementById('addPromptFile').selectedIndex = 0;
-  document.getElementById('addWorkDir').value = '';
-  document.getElementById('addMcpConfig').selectedIndex = 0;
-  document.getElementById('addToolsPreset').selectedIndex = 0;
-  document.getElementById('addTools').value = '';
+  loadSchedules();
+}
+
+async function deleteEditing() {
+  if (!editingId) return;
+  if (!confirm('このスケジュールを削除しますか？')) return;
+  await fetch('/api/schedules/' + editingId, { method:'DELETE' });
+  closeModal('addModal');
   loadSchedules();
 }
 
