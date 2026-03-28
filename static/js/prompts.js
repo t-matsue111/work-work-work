@@ -11,6 +11,8 @@ document.addEventListener('alpine:init', function () {
       nameDisabled: false,
 
       async init() {
+        var self = this;
+        registerPageShortcuts({ new: function() { self.openNew(); } });
         await this.loadPrompts();
       },
 

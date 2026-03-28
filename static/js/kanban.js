@@ -27,6 +27,8 @@ document.addEventListener('alpine:init', function () {
       },
 
       async init() {
+        var self = this;
+        registerPageShortcuts({ new: function() { self.showAddModal = true; } });
         await this.loadTasks();
         this.setupDragDrop();
         setInterval(() => this.loadTasks(), 30000);

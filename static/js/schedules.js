@@ -11,6 +11,8 @@ document.addEventListener('alpine:init', function () {
       form: {},
 
       async init() {
+        var self = this;
+        registerPageShortcuts({ new: function() { self.openAdd(); } });
         await this.loadSchedules();
         await this.loadPromptFiles();
         setInterval(() => this.loadSchedules(), 30000);

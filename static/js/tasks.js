@@ -12,6 +12,11 @@ document.addEventListener('alpine:init', function () {
       totalCount: 0,
 
       async init() {
+        var self = this;
+        registerPageShortcuts({
+          prev: function() { if (self.hasPrev) self.changePage(-1); },
+          next: function() { if (self.hasNext) self.changePage(1); },
+        });
         await this.loadTasks();
       },
 
