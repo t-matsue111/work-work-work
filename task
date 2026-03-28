@@ -1,0 +1,757 @@
+#!/bin/bash
+# タスク管理CLIコマンド
+# 使い方: ./task <サブコマンド> [オプション]
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
+DB_FILE="$PROJECT_DIR/db/tasks.db"
+INIT_SCRIPT="$PROJECT_DIR/sources/sqlite/init-tasks-db.sh"
+CRON_NEXT="$PROJECT_DIR/scripts/cron-next.py"
+
+# ── ANSIカラー定義 ──
+C_RESET="\033[0m"
+C_BOLD="\033[1m"
+C_YELLOW="\033[33m"
+C_BLUE="\033[34m"
+C_GREEN="\033[32m"
+C_RED="\033[31m"
+C_MAGENTA="\033[35m"
+C_CYAN="\033[36m"
+C_DIM="\033[2m"
+
+# ── DB存在チェック（なければ自動初期化） ──
+ensure_db() {
+  if [ ! -f "$DB_FILE" ]; then
+    echo "タスクDBが見つかりません。初期化します..."
+    bash "$INIT_SCRIPT"
+  fi
+}
+
+# ── SQLエスケープ ──
+escape_sql() {
+  echo "$1" | sed "s/'/''/g"
+}
+
+# ── ステータスに色を付ける ──
+colorize_status() {
+  local s="$1"
+  case "$s" in
+    pending)              printf "${C_YELLOW}%-20s${C_RESET}" "$s" ;;
+    in_progress)          printf "${C_BLUE}%-20s${C_RESET}" "$s" ;;
+    completed)            printf "${C_GREEN}%-20s${C_RESET}" "$s" ;;
+    error)                printf "${C_RED}%-20s${C_RESET}" "$s" ;;
+    needs_clarification)  printf "${C_MAGENTA}%-20s${C_RESET}" "$s" ;;
+    needs_review)         printf "${C_CYAN}%-20s${C_RESET}" "$s" ;;
+    *)                    printf "%-20s" "$s" ;;
+  esac
+}
+
+# ── ヘルプ表示 ──
+show_help() {
+  cat <<'HELP'
+タスク管理CLI
+
+使い方:
+  ./task <サブコマンド> [オプション]
+
+サブコマンド:
+  add                タスクを追加（対話モード / ワンライナー）
+  list [オプション]  タスク一覧を表示
+  show <ID>          タスク詳細を表示
+  done <ID>          タスクを completed にする
+  cancel <ID>        タスクを cancelled にする
+  retry <ID>         タスクを pending に戻す（error時）
+  stats              タスク統計を表示
+  help               このヘルプを表示
+
+スケジュール管理:
+  schedule-add       スケジュールを追加
+  schedule-list      スケジュール一覧を表示
+  schedule-show <ID> スケジュール詳細を表示
+  schedule-enable <ID>   スケジュールを有効化
+  schedule-disable <ID>  スケジュールを無効化
+  schedule-delete <ID>   スケジュールを削除
+  schedule-run <ID>      手動即時実行
+
+add オプション:
+  -n <名前>          タスク名
+  -t <種別>          research / sentry_analysis / planning / code_review / email_check
+  -p <優先度>        high / medium / low（デフォルト: medium）
+  -i <入力情報>      タスクの詳細・入力
+
+list オプション:
+  --all              全ステータスを表示
+  --status <状態>    指定ステータスのみ表示
+
+schedule-add オプション:
+  -n <名前>              スケジュール名（必須）
+  -c <cron式>            cron式（必須）
+  -t <種別>              タスク種別（デフォルト: research）
+  -p <優先度>            優先度（デフォルト: medium）
+  -m <モデル>            モデル名（デフォルト: sonnet）
+  -b <バックエンド>      claude / ollama / codex（デフォルト: claude）
+  --prompt <テキスト>    プロンプトテキスト
+  --prompt-file <パス>   プロンプトファイルパス
+  --work-dir <パス>      作業ディレクトリ
+  --mcp-config <パス>    MCP設定ファイルパス
+  --allowed-tools <ツール> 許可ツール（カンマ区切り）
+  --timeout <秒>         タイムアウト秒数（デフォルト: 300）
+  --max-turns <N>        最大ターン数（デフォルト: 30）
+  --max-failures <N>     連続失敗上限（デフォルト: 3）
+  --session-persistent   セッション永続化
+  --description <説明>   スケジュールの説明
+
+例:
+  ./task add
+  ./task add -n "PR #123のレビュー" -t code_review -p high -i "https://github.com/org/repo/pull/123"
+  ./task list
+  ./task list --all
+  ./task list --status in_progress
+  ./task show 5
+  ./task done 5
+  ./task stats
+  ./task schedule-add -n "メールチェック" -c "7 8-20 * * 1-5" -t email_check --session-persistent
+  ./task schedule-list
+  ./task schedule-run 1
+HELP
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: add
+# ══════════════════════════════════════════
+cmd_add() {
+  ensure_db
+
+  local task_name="" task_type="" priority="" input_text=""
+
+  # オプション解析
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n) task_name="$2"; shift 2 ;;
+      -t) task_type="$2"; shift 2 ;;
+      -p) priority="$2"; shift 2 ;;
+      -i) input_text="$2"; shift 2 ;;
+      *)  echo "不明なオプション: $1"; exit 1 ;;
+    esac
+  done
+
+  # ワンライナーモード（-n が指定されている場合）
+  if [ -n "$task_name" ]; then
+    # 必須チェック
+    if [ -z "$task_type" ]; then
+      echo "エラー: -t（種別）は必須です"
+      exit 1
+    fi
+    priority="${priority:-medium}"
+    _validate_type "$task_type"
+    _validate_priority "$priority"
+    _insert_task "$task_name" "$task_type" "$priority" "$input_text"
+    return
+  fi
+
+  # ── 対話モード ──
+  echo -e "${C_BOLD}=== タスク追加（対話モード） ===${C_RESET}"
+  echo ""
+
+  # 1. タスク名
+  while true; do
+    read -r -p "タスク名（必須）: " task_name
+    if [ -n "$task_name" ]; then
+      break
+    fi
+    echo "タスク名は必須です。"
+  done
+
+  # 2. 種別
+  echo ""
+  echo "種別を選択してください:"
+  echo "  1) research        - 技術調査・コードベース分析"
+  echo "  2) sentry_analysis - Sentryイシュー原因調査"
+  echo "  3) planning        - 要件→実装計画作成"
+  echo "  4) code_review     - PRレビューコメント投稿"
+  echo "  5) email_check     - メール確認・要約"
+  while true; do
+    read -r -p "種別 [1-5]: " type_num
+    case "$type_num" in
+      1) task_type="research"; break ;;
+      2) task_type="sentry_analysis"; break ;;
+      3) task_type="planning"; break ;;
+      4) task_type="code_review"; break ;;
+      5) task_type="email_check"; break ;;
+      *) echo "1〜5の番号を入力してください。" ;;
+    esac
+  done
+
+  # 3. 優先度
+  echo ""
+  read -r -p "優先度 [high/medium/low]（デフォルト: medium）: " priority
+  priority="${priority:-medium}"
+  _validate_priority "$priority"
+
+  # 4. 入力情報（複数行対応）
+  echo ""
+  echo "入力情報（タスクの詳細）を入力してください。空行で終了:"
+  input_text=""
+  while IFS= read -r line; do
+    if [ -z "$line" ]; then
+      break
+    fi
+    if [ -n "$input_text" ]; then
+      input_text="$input_text"$'\n'"$line"
+    else
+      input_text="$line"
+    fi
+  done
+
+  # 5. 確認
+  echo ""
+  echo -e "${C_BOLD}── 登録内容確認 ──${C_RESET}"
+  echo "  タスク名: $task_name"
+  echo "  種別:     $task_type"
+  echo "  優先度:   $priority"
+  echo "  入力:     $input_text"
+  echo ""
+  read -r -p "登録しますか？ [Y/n] " confirm
+  case "$confirm" in
+    [nN]*) echo "キャンセルしました。"; exit 0 ;;
+  esac
+
+  _insert_task "$task_name" "$task_type" "$priority" "$input_text"
+}
+
+_validate_type() {
+  # ラベルは自由入力（空文字のみ拒否）
+  if [ -z "$1" ]; then
+    echo "エラー: ラベル（種別）は必須です"
+    exit 1
+  fi
+}
+
+_validate_priority() {
+  case "$1" in
+    high|medium|low) ;;
+    *)
+      echo "エラー: 不明な優先度 '$1'"
+      echo "有効な優先度: high / medium / low"
+      exit 1
+      ;;
+  esac
+}
+
+_insert_task() {
+  local name="$1" type="$2" prio="$3" input="$4"
+  local sql_name sql_type sql_input sql_prio
+
+  sql_name="$(escape_sql "$name")"
+  sql_type="$(escape_sql "$type")"
+  sql_input="$(escape_sql "$input")"
+  sql_prio="$(escape_sql "$prio")"
+
+  local task_id
+  task_id="$(sqlite3 "$DB_FILE" "INSERT INTO tasks (task_name, task_type, input, priority) VALUES ('${sql_name}', '${sql_type}', '${sql_input}', '${sql_prio}'); SELECT last_insert_rowid();")"
+
+  echo ""
+  echo -e "${C_GREEN}タスクを追加しました (ID: ${task_id})${C_RESET}"
+  echo "  タスク名: $name"
+  echo "  種別:     $type"
+  echo "  優先度:   $prio"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: list
+# ══════════════════════════════════════════
+cmd_list() {
+  ensure_db
+
+  local where_clause="WHERE status IN ('pending', 'in_progress', 'needs_clarification', 'needs_review', 'error')"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all)    where_clause=""; shift ;;
+      --status) where_clause="WHERE status = '$(escape_sql "$2")'"; shift 2 ;;
+      *)        echo "不明なオプション: $1"; exit 1 ;;
+    esac
+  done
+
+  local query="SELECT id, status, task_type, priority, task_name FROM tasks ${where_clause} ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, id;"
+
+  local rows
+  rows="$(sqlite3 -separator '|' "$DB_FILE" "$query")"
+
+  if [ -z "$rows" ]; then
+    echo "該当するタスクはありません。"
+    return
+  fi
+
+  # ヘッダー
+  printf "${C_BOLD}%-4s  %-20s  %-16s  %-8s  %s${C_RESET}\n" "ID" "ステータス" "種別" "優先度" "タスク名"
+  printf "${C_DIM}%-4s  %-20s  %-16s  %-8s  %s${C_RESET}\n" "──" "──────────────────" "──────────────" "──────" "──────────────"
+
+  while IFS='|' read -r id status task_type priority task_name; do
+    printf "%-4s  " "$id"
+    colorize_status "$status"
+    printf "  %-16s  %-8s  %s\n" "$task_type" "$priority" "$task_name"
+  done <<< "$rows"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: show
+# ══════════════════════════════════════════
+cmd_show() {
+  ensure_db
+
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task show <ID>"
+    exit 1
+  fi
+
+  local id="$1"
+  local row
+  row="$(sqlite3 -separator '|' "$DB_FILE" "SELECT id, task_name, task_type, priority, status, input, result, assigned_session_id, started_at, completed_at, created_at, updated_at FROM tasks WHERE id = $id;")"
+
+  if [ -z "$row" ]; then
+    echo "エラー: ID $id のタスクが見つかりません。"
+    exit 1
+  fi
+
+  IFS='|' read -r t_id t_name t_type t_prio t_status t_input t_result t_session t_started t_completed t_created t_updated <<< "$row"
+
+  echo -e "${C_BOLD}=== タスク詳細 (ID: ${t_id}) ===${C_RESET}"
+  echo ""
+  echo -e "  タスク名:       ${C_BOLD}${t_name}${C_RESET}"
+  echo -n "  ステータス:     "
+  colorize_status "$t_status"
+  echo ""
+  echo "  種別:           $t_type"
+  echo "  優先度:         $t_prio"
+  echo "  セッションID:   ${t_session:-(なし)}"
+  echo "  作成日時:       $t_created"
+  echo "  更新日時:       $t_updated"
+  echo "  開始日時:       ${t_started:-(なし)}"
+  echo "  完了日時:       ${t_completed:-(なし)}"
+  echo ""
+  echo -e "${C_BOLD}── 入力情報 ──${C_RESET}"
+  if [ -n "$t_input" ]; then
+    echo "$t_input"
+  else
+    echo "(なし)"
+  fi
+  echo ""
+  echo -e "${C_BOLD}── 結果 ──${C_RESET}"
+  if [ -n "$t_result" ]; then
+    echo "$t_result"
+  else
+    echo "(なし)"
+  fi
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: done
+# ══════════════════════════════════════════
+cmd_done() {
+  ensure_db
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task done <ID>"
+    exit 1
+  fi
+  _update_status "$1" "completed" "completed_at = datetime('now','localtime'),"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: cancel
+# ══════════════════════════════════════════
+cmd_cancel() {
+  ensure_db
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task cancel <ID>"
+    exit 1
+  fi
+
+  # cancelled は CHECK制約にないため、completed にして result に記録
+  # → スキーマ上 cancelled は許可されていないので、error にして result にキャンセル理由を書く
+  local id="$1"
+  local current_status
+  current_status="$(sqlite3 "$DB_FILE" "SELECT status FROM tasks WHERE id = $id;" 2>/dev/null || true)"
+
+  if [ -z "$current_status" ]; then
+    echo "エラー: ID $id のタスクが見つかりません。"
+    exit 1
+  fi
+
+  sqlite3 "$DB_FILE" "UPDATE tasks SET status = 'error', result = 'キャンセル（手動）。変更前ステータス: ${current_status}' WHERE id = $id;"
+  echo -e "${C_YELLOW}タスク $id をキャンセルしました（status: error, 理由をresultに記録）${C_RESET}"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: retry
+# ══════════════════════════════════════════
+cmd_retry() {
+  ensure_db
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task retry <ID>"
+    exit 1
+  fi
+
+  local id="$1"
+  local current_status
+  current_status="$(sqlite3 "$DB_FILE" "SELECT status FROM tasks WHERE id = $id;" 2>/dev/null || true)"
+
+  if [ -z "$current_status" ]; then
+    echo "エラー: ID $id のタスクが見つかりません。"
+    exit 1
+  fi
+
+  if [ "$current_status" != "error" ] && [ "$current_status" != "needs_clarification" ]; then
+    echo "エラー: retry は error または needs_clarification のタスクのみ対象です（現在: $current_status）"
+    exit 1
+  fi
+
+  sqlite3 "$DB_FILE" "UPDATE tasks SET status = 'pending', assigned_session_id = NULL, started_at = NULL WHERE id = $id;"
+  echo -e "${C_GREEN}タスク $id を pending に戻しました${C_RESET}"
+}
+
+# ── ステータス更新ヘルパー ──
+_update_status() {
+  local id="$1" new_status="$2" extra_set="${3:-}"
+
+  local current_status
+  current_status="$(sqlite3 "$DB_FILE" "SELECT status FROM tasks WHERE id = $id;" 2>/dev/null || true)"
+
+  if [ -z "$current_status" ]; then
+    echo "エラー: ID $id のタスクが見つかりません。"
+    exit 1
+  fi
+
+  sqlite3 "$DB_FILE" "UPDATE tasks SET ${extra_set} status = '${new_status}' WHERE id = $id;"
+  echo -e "${C_GREEN}タスク $id のステータスを ${current_status} → ${new_status} に変更しました${C_RESET}"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: stats
+# ══════════════════════════════════════════
+cmd_stats() {
+  ensure_db
+
+  echo -e "${C_BOLD}=== タスク統計 ===${C_RESET}"
+
+  local statuses=("pending" "in_progress" "completed" "error" "needs_clarification" "needs_review")
+  local total=0
+
+  for s in "${statuses[@]}"; do
+    local count
+    count="$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM tasks WHERE status = '$s';")"
+    total=$((total + count))
+    printf "  %-22s %s\n" "${s}:" "$count"
+  done
+
+  echo "  ──────────────────────────"
+  printf "  %-22s %s\n" "合計:" "$total"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: schedule-add
+# ══════════════════════════════════════════
+cmd_schedule_add() {
+  ensure_db
+
+  local name="" cron_expr="" task_type="research" priority="medium"
+  local model="sonnet" backend="claude" description=""
+  local prompt="" prompt_file="" work_dir="" mcp_config="" allowed_tools=""
+  local timeout=300 max_turns=30 max_failures=3 session_persistent=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n) name="$2"; shift 2 ;;
+      -c) cron_expr="$2"; shift 2 ;;
+      -t) task_type="$2"; shift 2 ;;
+      -p) priority="$2"; shift 2 ;;
+      -m) model="$2"; shift 2 ;;
+      -b) backend="$2"; shift 2 ;;
+      --prompt) prompt="$2"; shift 2 ;;
+      --prompt-file) prompt_file="$2"; shift 2 ;;
+      --work-dir) work_dir="$2"; shift 2 ;;
+      --mcp-config) mcp_config="$2"; shift 2 ;;
+      --allowed-tools) allowed_tools="$2"; shift 2 ;;
+      --timeout) timeout="$2"; shift 2 ;;
+      --max-turns) max_turns="$2"; shift 2 ;;
+      --max-failures) max_failures="$2"; shift 2 ;;
+      --session-persistent) session_persistent=1; shift ;;
+      --description) description="$2"; shift 2 ;;
+      *) echo "不明なオプション: $1"; exit 1 ;;
+    esac
+  done
+
+  if [ -z "$name" ]; then
+    echo "エラー: -n（名前）は必須です"
+    exit 1
+  fi
+  if [ -z "$cron_expr" ]; then
+    echo "エラー: -c（cron式）は必須です"
+    exit 1
+  fi
+
+  _validate_type "$task_type"
+  _validate_priority "$priority"
+
+  # cron式のバリデーション（次回実行時刻を計算）
+  local next_run
+  next_run="$(python3 "$CRON_NEXT" "$cron_expr" 2>&1)" || {
+    echo "エラー: cron式が不正です: $cron_expr"
+    echo "$next_run"
+    exit 1
+  }
+
+  local sql_name sql_desc sql_type sql_prio sql_cron sql_backend sql_model
+  local sql_prompt sql_prompt_file sql_work_dir sql_mcp_config sql_allowed_tools sql_next_run
+
+  sql_name="$(escape_sql "$name")"
+  sql_desc="$(escape_sql "$description")"
+  sql_type="$(escape_sql "$task_type")"
+  sql_prio="$(escape_sql "$priority")"
+  sql_cron="$(escape_sql "$cron_expr")"
+  sql_backend="$(escape_sql "$backend")"
+  sql_model="$(escape_sql "$model")"
+  sql_prompt="$(escape_sql "$prompt")"
+  sql_prompt_file="$(escape_sql "$prompt_file")"
+  sql_work_dir="$(escape_sql "$work_dir")"
+  sql_mcp_config="$(escape_sql "$mcp_config")"
+  sql_allowed_tools="$(escape_sql "$allowed_tools")"
+  sql_next_run="$(escape_sql "$next_run")"
+
+  local schedule_id
+  schedule_id="$(sqlite3 "$DB_FILE" "INSERT INTO schedules (name, description, task_type, priority, cron_expr, backend, model, prompt, prompt_file, work_dir, mcp_config, allowed_tools, timeout_seconds, max_turns, max_consecutive_failures, session_persistent, next_run_at) VALUES ('${sql_name}', '${sql_desc}', '${sql_type}', '${sql_prio}', '${sql_cron}', '${sql_backend}', '${sql_model}', '${sql_prompt}', '${sql_prompt_file}', '${sql_work_dir}', '${sql_mcp_config}', '${sql_allowed_tools}', ${timeout}, ${max_turns}, ${max_failures}, ${session_persistent}, '${sql_next_run}'); SELECT last_insert_rowid();")" || {
+    echo "エラー: スケジュールの登録に失敗しました（名前の重複等）"
+    exit 1
+  }
+
+  echo ""
+  echo -e "${C_GREEN}スケジュールを追加しました (ID: ${schedule_id})${C_RESET}"
+  echo "  名前:       $name"
+  echo "  cron式:     $cron_expr"
+  echo "  種別:       $task_type"
+  echo "  バックエンド: $backend + $model"
+  echo "  次回実行:   $next_run"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: schedule-list
+# ══════════════════════════════════════════
+cmd_schedule_list() {
+  ensure_db
+
+  local rows
+  rows="$(sqlite3 -separator '|' "$DB_FILE" "SELECT id, enabled, name, cron_expr, backend, model, task_type, next_run_at, last_status, consecutive_failures FROM schedules ORDER BY id;")"
+
+  if [ -z "$rows" ]; then
+    echo "登録されたスケジュールはありません。"
+    return
+  fi
+
+  printf "${C_BOLD}%-4s  %-3s  %-24s  %-20s  %-14s  %-12s  %-20s  %-8s  %s${C_RESET}\n" \
+    "ID" "有効" "名前" "cron式" "バックエンド" "種別" "次回実行" "状態" "失敗"
+  printf "${C_DIM}%-4s  %-3s  %-24s  %-20s  %-14s  %-12s  %-20s  %-8s  %s${C_RESET}\n" \
+    "──" "──" "────────────────────────" "──────────────────" "────────────" "──────────" "──────────────────" "──────" "────"
+
+  while IFS='|' read -r id enabled name cron_expr backend model task_type next_run last_status failures; do
+    local enabled_mark
+    if [ "$enabled" = "1" ]; then
+      enabled_mark="${C_GREEN}●${C_RESET}"
+    else
+      enabled_mark="${C_RED}○${C_RESET}"
+    fi
+    printf "%-4s  " "$id"
+    printf " $enabled_mark  "
+    printf "%-24s  %-20s  %-14s  %-12s  %-20s  %-8s  %s\n" \
+      "$name" "$cron_expr" "${backend}+${model}" "$task_type" "${next_run:-(未設定)}" "${last_status:--}" "$failures"
+  done <<< "$rows"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: schedule-show
+# ══════════════════════════════════════════
+cmd_schedule_show() {
+  ensure_db
+
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task schedule-show <ID>"
+    exit 1
+  fi
+
+  local id="$1"
+  local row
+  row="$(sqlite3 -separator '|' "$DB_FILE" "SELECT id, name, description, task_type, priority, cron_expr, enabled, backend, model, work_dir, mcp_config, allowed_tools, prompt, prompt_file, timeout_seconds, max_turns, session_persistent, last_run_at, next_run_at, last_status, max_consecutive_failures, consecutive_failures, created_at, updated_at FROM schedules WHERE id = $id;")"
+
+  if [ -z "$row" ]; then
+    echo "エラー: ID $id のスケジュールが見つかりません。"
+    exit 1
+  fi
+
+  IFS='|' read -r s_id s_name s_desc s_type s_prio s_cron s_enabled s_backend s_model s_workdir s_mcp s_tools s_prompt s_promptfile s_timeout s_maxturns s_persistent s_lastrun s_nextrun s_laststatus s_maxfail s_failures s_created s_updated <<< "$row"
+
+  local enabled_str
+  if [ "$s_enabled" = "1" ]; then
+    enabled_str="${C_GREEN}有効${C_RESET}"
+  else
+    enabled_str="${C_RED}無効${C_RESET}"
+  fi
+
+  echo -e "${C_BOLD}=== スケジュール詳細 (ID: ${s_id}) ===${C_RESET}"
+  echo ""
+  echo -e "  名前:           ${C_BOLD}${s_name}${C_RESET}"
+  echo -e "  状態:           $enabled_str"
+  echo "  説明:           ${s_desc:-(なし)}"
+  echo "  cron式:         $s_cron"
+  echo "  種別:           $s_type"
+  echo "  優先度:         $s_prio"
+  echo "  バックエンド:   $s_backend + $s_model"
+  echo "  タイムアウト:   ${s_timeout}秒"
+  echo "  最大ターン:     $s_maxturns"
+  echo "  セッション永続: $([ "$s_persistent" = "1" ] && echo "はい" || echo "いいえ")"
+  echo "  作業ディレクトリ: ${s_workdir:-(なし)}"
+  echo "  MCP設定:        ${s_mcp:-(なし)}"
+  echo "  許可ツール:     ${s_tools:-(なし)}"
+  echo ""
+  echo "  最終実行:       ${s_lastrun:-(なし)}"
+  echo "  次回実行:       ${s_nextrun:-(なし)}"
+  echo "  最終状態:       ${s_laststatus:--}"
+  echo "  連続失敗:       ${s_failures} / ${s_maxfail}"
+  echo ""
+  echo "  作成日時:       $s_created"
+  echo "  更新日時:       $s_updated"
+  echo ""
+  echo -e "${C_BOLD}── プロンプト ──${C_RESET}"
+  if [ -n "$s_prompt" ]; then
+    echo "$s_prompt"
+  elif [ -n "$s_promptfile" ]; then
+    echo "(ファイル: $s_promptfile)"
+  else
+    echo "(なし)"
+  fi
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: schedule-enable / schedule-disable
+# ══════════════════════════════════════════
+cmd_schedule_enable() {
+  ensure_db
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task schedule-enable <ID>"
+    exit 1
+  fi
+  local id="$1"
+
+  # 存在チェック
+  local exists
+  exists="$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM schedules WHERE id = $id;")"
+  if [ "$exists" = "0" ]; then
+    echo "エラー: ID $id のスケジュールが見つかりません。"
+    exit 1
+  fi
+
+  # next_run_atを再計算
+  local cron_expr next_run
+  cron_expr="$(sqlite3 "$DB_FILE" "SELECT cron_expr FROM schedules WHERE id = $id;")"
+  next_run="$(python3 "$CRON_NEXT" "$cron_expr" 2>/dev/null || echo "")"
+
+  sqlite3 "$DB_FILE" "UPDATE schedules SET enabled = 1, consecutive_failures = 0, next_run_at = '$(escape_sql "$next_run")' WHERE id = $id;"
+  echo -e "${C_GREEN}スケジュール $id を有効化しました（次回実行: ${next_run})${C_RESET}"
+}
+
+cmd_schedule_disable() {
+  ensure_db
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task schedule-disable <ID>"
+    exit 1
+  fi
+  local id="$1"
+
+  local exists
+  exists="$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM schedules WHERE id = $id;")"
+  if [ "$exists" = "0" ]; then
+    echo "エラー: ID $id のスケジュールが見つかりません。"
+    exit 1
+  fi
+
+  sqlite3 "$DB_FILE" "UPDATE schedules SET enabled = 0 WHERE id = $id;"
+  echo -e "${C_YELLOW}スケジュール $id を無効化しました${C_RESET}"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: schedule-delete
+# ══════════════════════════════════════════
+cmd_schedule_delete() {
+  ensure_db
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task schedule-delete <ID>"
+    exit 1
+  fi
+  local id="$1"
+
+  local name
+  name="$(sqlite3 "$DB_FILE" "SELECT name FROM schedules WHERE id = $id;" 2>/dev/null || true)"
+  if [ -z "$name" ]; then
+    echo "エラー: ID $id のスケジュールが見つかりません。"
+    exit 1
+  fi
+
+  sqlite3 "$DB_FILE" "DELETE FROM schedules WHERE id = $id;"
+  echo -e "${C_RED}スケジュール $id (${name}) を削除しました${C_RESET}"
+}
+
+# ══════════════════════════════════════════
+# サブコマンド: schedule-run（手動即時実行）
+# ══════════════════════════════════════════
+cmd_schedule_run() {
+  ensure_db
+  if [ -z "${1:-}" ]; then
+    echo "使い方: ./task schedule-run <ID>"
+    exit 1
+  fi
+  local id="$1"
+
+  local row
+  row="$(sqlite3 -separator '|' "$DB_FILE" "SELECT id, name, enabled FROM schedules WHERE id = $id;")"
+  if [ -z "$row" ]; then
+    echo "エラー: ID $id のスケジュールが見つかりません。"
+    exit 1
+  fi
+
+  IFS='|' read -r s_id s_name s_enabled <<< "$row"
+
+  # next_run_atを現在時刻に設定（次のrun-tasks.sh実行時にピックアップされる）
+  local now
+  now="$(date '+%Y-%m-%d %H:%M:%S')"
+  sqlite3 "$DB_FILE" "UPDATE schedules SET next_run_at = '$(escape_sql "$now")', enabled = 1 WHERE id = $id;"
+  echo -e "${C_GREEN}スケジュール $id (${s_name}) を手動トリガーしました${C_RESET}"
+  echo "  次回の run-tasks.sh 実行時に処理されます"
+}
+
+# ══════════════════════════════════════════
+# メインルーティング
+# ══════════════════════════════════════════
+subcmd="${1:-help}"
+shift || true
+
+case "$subcmd" in
+  add)     cmd_add "$@" ;;
+  list|ls) cmd_list "$@" ;;
+  show)    cmd_show "$@" ;;
+  done)    cmd_done "$@" ;;
+  cancel)  cmd_cancel "$@" ;;
+  retry)   cmd_retry "$@" ;;
+  stats)   cmd_stats "$@" ;;
+  schedule-add)     cmd_schedule_add "$@" ;;
+  schedule-list|schedule-ls) cmd_schedule_list "$@" ;;
+  schedule-show)    cmd_schedule_show "$@" ;;
+  schedule-enable)  cmd_schedule_enable "$@" ;;
+  schedule-disable) cmd_schedule_disable "$@" ;;
+  schedule-delete)  cmd_schedule_delete "$@" ;;
+  schedule-run)     cmd_schedule_run "$@" ;;
+  help|-h|--help) show_help ;;
+  *)
+    echo "不明なサブコマンド: $subcmd"
+    echo "ヘルプ: ./task help"
+    exit 1
+    ;;
+esac

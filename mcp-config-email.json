@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "google_workspace_mcp": {
+      "command": "/bin/bash",
+      "args": [
+        "/Users/t.matsue/.claude/scripts/run-google-workspace-mcp.sh"
+      ]
+    }
+  }
+}

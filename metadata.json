@@ -1,0 +1,89 @@
+{
+  "title": "Claude Task Runner",
+  "description": "タスクランナーの実行ログとタスク管理データベース",
+  "databases": {
+    "logs": {
+      "source": "Claude Task Runner",
+      "source_url": "",
+      "tables": {
+        "execution_logs": {
+          "title": "実行ログ",
+          "description": "各タスク実行の詳細ログ",
+          "sort_desc": "timestamp",
+          "columns": {
+            "timestamp": "実行日時",
+            "runner_type": "ランナー種別（task_runner/email_checker）",
+            "task_source": "タスクソース（sqlite/notion/github）",
+            "session_id": "Claude セッションID",
+            "task_type": "タスク種別",
+            "task_name": "タスク名",
+            "status": "実行結果",
+            "result_summary": "結果要約",
+            "duration_seconds": "実行時間（秒）",
+            "cost_usd": "コスト（USD）",
+            "input_tokens": "入力トークン数",
+            "output_tokens": "出力トークン数",
+            "model": "使用モデル"
+          }
+        }
+      },
+      "queries": {
+        "recent_errors": {
+          "title": "直近のエラー",
+          "sql": "SELECT timestamp, task_type, task_name, error_message FROM execution_logs WHERE status = 'error' ORDER BY timestamp DESC LIMIT 20"
+        },
+        "daily_cost": {
+          "title": "日別コスト",
+          "sql": "SELECT * FROM daily_cost_summary ORDER BY date DESC LIMIT 30"
+        },
+        "monthly_cost": {
+          "title": "月別コスト",
+          "sql": "SELECT * FROM monthly_cost_summary ORDER BY month DESC"
+        }
+      }
+    },
+    "tasks": {
+      "source": "Claude Task Runner",
+      "source_url": "",
+      "tables": {
+        "tasks": {
+          "title": "タスク一覧",
+          "description": "タスクランナーが処理するタスクの管理テーブル（SQLiteタスクソース）",
+          "sort_desc": "created_at",
+          "columns": {
+            "id": "タスクID（自動採番）",
+            "task_name": "タスク名",
+            "task_type": "タスク種別（research/sentry_analysis/planning/code_review）",
+            "priority": "優先度（high/medium/low）",
+            "status": "ステータス（pending/in_progress/completed/error/needs_clarification/needs_review）",
+            "input": "タスクの詳細説明・入力情報",
+            "result": "実行結果",
+            "assigned_session_id": "割り当てられた Claude セッションID",
+            "started_at": "実行開始日時",
+            "completed_at": "実行完了日時",
+            "created_at": "作成日時",
+            "updated_at": "最終更新日時"
+          }
+        }
+      },
+      "queries": {
+        "pending_tasks": {
+          "title": "実行待ちタスク",
+          "sql": "SELECT id, task_name, task_type, priority, created_at FROM tasks WHERE status = 'pending' ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at ASC"
+        },
+        "recent_completed": {
+          "title": "最近完了したタスク",
+          "sql": "SELECT id, task_name, task_type, completed_at, result FROM tasks WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 20"
+        },
+        "error_tasks": {
+          "title": "エラーのタスク",
+          "sql": "SELECT id, task_name, task_type, result, updated_at FROM tasks WHERE status = 'error' ORDER BY updated_at DESC LIMIT 20"
+        },
+        "task_stats": {
+          "title": "タスク統計",
+          "sql": "SELECT status, COUNT(*) as count, task_type FROM tasks GROUP BY status, task_type ORDER BY status, task_type"
+        }
+      }
+    }
+  }
+}

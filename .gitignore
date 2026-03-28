@@ -1,0 +1,21 @@
+# データベース
+db/*.db
+db/*.db-*
+
+# セッションファイル
+.sessions/
+
+# ログ
+logs/
+
+# macOS
+.DS_Store
+
+# バックアップ
+*.bak-*
+
+# Python
+__pycache__/
+
+# Claude Code
+.claude/
