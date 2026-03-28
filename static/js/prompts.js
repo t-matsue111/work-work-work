@@ -12,7 +12,10 @@ document.addEventListener('alpine:init', function () {
 
       async init() {
         var self = this;
-        registerPageShortcuts({ new: function() { self.openNew(); } });
+        registerPageShortcuts({
+          new: function() { self.openNew(); },
+          modalDelete: function() { if (self.showModal && self.editingFile) self.deletePrompt(); },
+        });
         await this.loadPrompts();
       },
 

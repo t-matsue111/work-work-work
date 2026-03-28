@@ -28,7 +28,11 @@ document.addEventListener('alpine:init', function () {
 
       async init() {
         var self = this;
-        registerPageShortcuts({ new: function() { self.showAddModal = true; } });
+        registerPageShortcuts({
+          new: function() { self.showAddModal = true; },
+          modalDelete: function() { if (self.showDetailModal && self.detailTask) self.deleteTask(self.detailTask.id); },
+          modalArchive: function() { if (self.showDetailModal && self.detailTask && (self.detailTask.status === 'completed' || self.detailTask.status === 'error')) self.archiveTask(self.detailTask.id); },
+        });
         await this.loadTasks();
         this.setupDragDrop();
         setInterval(() => this.loadTasks(), 30000);

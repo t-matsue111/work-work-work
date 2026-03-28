@@ -140,6 +140,8 @@ document.addEventListener('keydown', function (e) {
       '<tr><td style="color:var(--secondary);font-family:var(--font-display)">N</td><td>New item</td></tr>' +
       '<tr><td style="color:var(--secondary);font-family:var(--font-display)">ESC</td><td>Close modal</td></tr>' +
       '<tr><td style="color:var(--secondary);font-family:var(--font-display)">[ ]</td><td>Pagination (Logs/Tasks)</td></tr>' +
+      '<tr><td style="color:var(--secondary);font-family:var(--font-display)">D</td><td>Delete (in modal)</td></tr>' +
+      '<tr><td style="color:var(--secondary);font-family:var(--font-display)">A</td><td>Archive (in modal)</td></tr>' +
       '<tr><td style="color:var(--secondary);font-family:var(--font-display)">?</td><td>This help</td></tr>' +
       '</table>' +
       '<div style="margin-top:16px;text-align:right"><span style="font-size:.75rem;color:var(--text-secondary)">Press ESC or ? to close</span></div>' +
@@ -150,6 +152,19 @@ document.addEventListener('keydown', function (e) {
     _shortcutHelp.addEventListener('click', function (ev) { if (ev.target === _shortcutHelp) { _shortcutHelp.remove(); _shortcutHelp = null; } });
     document.body.appendChild(_shortcutHelp);
     return;
+  }
+
+  // モーダルが開いている場合のショートカット (d=delete, a=archive)
+  var modalOpen = document.querySelector('.modal-overlay.active') ||
+    (function() { var el = document.querySelector('[x-data]'); if (!el) return false; var d = Alpine.$data(el); return Object.keys(d).some(function(k) { return k.indexOf('show') === 0 && k.indexOf('Modal') > 0 && d[k] === true; }); })();
+  if (modalOpen) {
+    if (e.key === 'd' || e.key === 'D') {
+      if (_pageShortcuts.modalDelete) { _pageShortcuts.modalDelete(); return; }
+    }
+    if (e.key === 'a' || e.key === 'A') {
+      if (_pageShortcuts.modalArchive) { _pageShortcuts.modalArchive(); return; }
+    }
+    return; // モーダル中は他のショートカットを無効化
   }
 
   // ページナビゲーション: 1-5
