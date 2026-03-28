@@ -253,7 +253,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def _handle_create_task(self):
         data = self._read_body()
-        required = ["task_name", "task_type"]
+        required = ["task_name"]
         for key in required:
             if key not in data or not data[key]:
                 self._send_json({"error": f"{key} is required"}, 400)
